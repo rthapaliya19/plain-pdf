@@ -33,6 +33,8 @@ The full plan is in [docs/PLAN.md](docs/PLAN.md).
 - **Select and copy:** drag across text (or long-press on a phone) and copy it. Scanned pages have no text to select.
 - **Search:** click the magnifying glass (or Ctrl+F, Cmd+F on Mac). Matches are highlighted; Enter and Shift+Enter go to the next and previous match; Esc closes.
 - **Print:** in the **⋯ More** menu (or Ctrl+P, Cmd+P). Prints what a saved copy would contain, including your drawings, text, signatures and form answers.
+- **Organize pages:** in the **⋯ More** menu. A grid of page previews: tap pages to select them (Shift-click for a range), then **Rotate left/right**, **Delete**, or **Save as new PDF** (just the selected pages). Drag pages to reorder them; on a phone, press and hold a page, then drag. Drawings, text and signatures stay with their page and turn with it. Everything can be undone.
+- **Add pages from another PDF:** in the **⋯ More** menu or the Organize screen. Adds all pages of one or more files to the end. Save then makes one combined file. (Fillable form fields are locked into the pages when pages are reorganized or combined.)
 - **Sign:** click **Sign** to open the Sign panel with your **signature** and **initials**. The first time, tap "+ Add signature" or "+ Add initials" and draw them (they're saved only on this device). After that, tap one to place it, or use **Draw new** or **Remove**. A placed signature appears in the middle of the page you're viewing: drag it to move, drag the round corner to resize, and tap × (or press Delete) to remove it.
 - **Save:** click **Save** (or Ctrl+S, Cmd+S on Mac) to save a copy named "name-edited.pdf" with everything you added locked into the pages. The original file is never changed. In Chrome on a computer you choose where to save it; on phones it goes to Downloads. Encrypted (password-protected) PDFs can't be saved with changes yet.
 - **Undo / Redo:** the buttons, or Ctrl+Z and Ctrl+Y (Cmd+Z and Cmd+Shift+Z on Mac).
@@ -61,6 +63,8 @@ src/
     history.ts         undo and redo
     tools.ts           tools plug in here; one is active at a time
     text-layout.ts     finds the lines and words of text on a page, so highlights can snap to them
+    workspace.ts       the page list: which file and page each page comes from, and its rotation
+    page-ops.ts        rotate, delete, move, add and pick pages, keeping additions on their pages
   overlay/
     overlay-renderer.ts  shows additions on each page (highlight and ink layers)
     paths.ts             smoothing and eraser hit-testing for strokes
@@ -70,6 +74,7 @@ src/
     text/              the Text tool: typing on pages, sizes and colours
     search/            the search bar and the page text index
     print/             printing (pages drawn as pictures, then the print window)
+    organize/          the Organize pages screen (select, rotate, delete, drag to reorder)
   ui/menu.ts           the More menu
   vendor/              form-field styles copied from PDF.js (Apache 2.0)
   save/
@@ -95,6 +100,7 @@ tests/
   e2e/text.test.cjs      browser tests for typing text
   e2e/forms.test.cjs     browser tests for filling forms and following links
   e2e/roundb.test.cjs    browser tests for selecting and copying text, search and print
+  e2e/roundc.test.cjs    browser tests for organizing, merging and splitting
   fixtures/              sample PDFs used by the tests
 ```
 
@@ -116,6 +122,7 @@ node tests/e2e/save.test.cjs   # needs: pip install pypdf
 node tests/e2e/text.test.cjs
 node tests/e2e/forms.test.cjs
 node tests/e2e/roundb.test.cjs
+node tests/e2e/roundc.test.cjs
 ```
 
 ## License

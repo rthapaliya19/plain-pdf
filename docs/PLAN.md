@@ -102,7 +102,7 @@ Decisions:
 - [x] Round B: search
 - [x] Round B: print
 - [ ] Round B: check-in (owner will test B and C together)
-- [ ] Round C: organize pages (rotate, delete, reorder)
-- [ ] Round C: merge and split
-- [ ] Round C: check-in
+- [x] Round C: organize pages (rotate, delete, reorder)
+- [x] Round C: merge and split
+- [ ] Round C: check-in (owner testing B and C together)
 - [ ] Phase 5: installable apps
