@@ -72,20 +72,27 @@ export interface PdfDocument {
    * Used when saving, so additions land exactly where they were drawn.
    */
   readonly pageToPdf: readonly Matrix[];
-  /** Draws page `index` (0-based) onto `canvas`, `pixelsPerPoint` pixels per PDF point. */
-  renderPage(index: number, canvas: HTMLCanvasElement, pixelsPerPoint: number): RenderJob;
+  /**
+   * Draws page `index` (0-based) onto `canvas`, `pixelsPerPoint` pixels per PDF point.
+   * `rotation` (0, 90, 180, 270) turns the page clockwise on top of its own rotation.
+   */
+  renderPage(index: number, canvas: HTMLCanvasElement, pixelsPerPoint: number, rotation?: number): RenderJob;
   /** Where the text on page `index` (0-based) sits. Used to make highlights follow the text. */
-  textFragments(index: number): Promise<TextFragment[]>;
+  textFragments(index: number, rotation?: number): Promise<TextFragment[]>;
   /**
    * Adds the page's fillable form fields and clickable links into `div`
    * (an element covering the page). Sizes follow the CSS variable
    * --total-scale-factor, so zooming needs no redraw.
    */
-  renderInteractive(index: number, div: HTMLDivElement, links: LinkHandler): Promise<void>;
+  renderInteractive(index: number, div: HTMLDivElement, links: LinkHandler, rotation?: number): Promise<void>;
   /** Draws page `index` for printing, including form answers, at `pixelsPerPoint`. */
-  renderForPrint(index: number, pixelsPerPoint: number): Promise<HTMLCanvasElement>;
+  renderForPrint(index: number, pixelsPerPoint: number, rotation?: number): Promise<HTMLCanvasElement>;
   /** Adds invisible, selectable text over page `index` (for selecting and copying). */
-  renderTextLayer(index: number, div: HTMLDivElement): Promise<void>;
+  renderTextLayer(index: number, div: HTMLDivElement, rotation?: number): Promise<void>;
+  /** Like pageToPdf, for the page turned by an extra `rotation`. */
+  pageToPdfAt(index: number, rotation: number): Matrix;
+  /** The page's own rotation in the file (0, 90, 180, 270). */
+  fileRotation(index: number): number;
   /** True once any form field has been filled in or changed. */
   readonly formsModified: boolean;
   onFormsChanged(callback: () => void): void;
@@ -187,9 +194,9 @@ export async function openPdf(bytes: Uint8Array, askPassword: PasswordPrompt): P
     pageSizes,
     encrypted,
     pageToPdf,
-    renderPage(index, canvas, pixelsPerPoint) {
+    renderPage(index, canvas, pixelsPerPoint, rotation = 0) {
       const page = pages[index];
-      const viewport = page.getViewport({ scale: pixelsPerPoint });
+      const viewport = page.getViewport({ scale: pixelsPerPoint, rotation: turned(page, rotation) });
       canvas.width = Math.max(1, Math.floor(viewport.width));
       canvas.height = Math.max(1, Math.floor(viewport.height));
       // Form fields are drawn as real input boxes on top (see renderInteractive), not on the canvas.
@@ -205,9 +212,9 @@ export async function openPdf(bytes: Uint8Array, askPassword: PasswordPrompt): P
         cancel: () => task.cancel(),
       };
     },
-    async textFragments(index) {
+    async textFragments(index, rotation = 0) {
       const page = pages[index];
-      const viewport = page.getViewport({ scale: 1 });
+      const viewport = page.getViewport({ scale: 1, rotation: turned(page, rotation) });
       const content = await page.getTextContent();
       const fragments: TextFragment[] = [];
       for (const item of content.items) {
@@ -221,12 +228,12 @@ export async function openPdf(bytes: Uint8Array, askPassword: PasswordPrompt): P
       }
       return fragments;
     },
-    async renderInteractive(index, div, links) {
+    async renderInteractive(index, div, links, rotation = 0) {
       const page = pages[index];
       const annotations = await page.getAnnotations({ intent: "display" });
       if (annotations.length === 0) return;
       fieldObjects ??= doc.getFieldObjects().catch(() => null);
-      const viewport = page.getViewport({ scale: 1 }).clone({ dontFlip: true });
+      const viewport = page.getViewport({ scale: 1, rotation: turned(page, rotation) }).clone({ dontFlip: true });
       const linkService = makeLinkService(doc, links);
       const layer = new AnnotationLayer({
         div,
@@ -256,9 +263,9 @@ export async function openPdf(bytes: Uint8Array, askPassword: PasswordPrompt): P
       } as Parameters<AnnotationLayer["render"]>[0]);
       formLayers[index] = layer;
     },
-    async renderForPrint(index, pixelsPerPoint) {
+    async renderForPrint(index, pixelsPerPoint, rotation = 0) {
       const page = pages[index];
-      const viewport = page.getViewport({ scale: pixelsPerPoint });
+      const viewport = page.getViewport({ scale: pixelsPerPoint, rotation: turned(page, rotation) });
       const canvas = document.createElement("canvas");
       canvas.width = Math.floor(viewport.width);
       canvas.height = Math.floor(viewport.height);
@@ -272,18 +279,26 @@ export async function openPdf(bytes: Uint8Array, askPassword: PasswordPrompt): P
       }).promise;
       return canvas;
     },
-    async renderTextLayer(index, div) {
+    async renderTextLayer(index, div, rotation = 0) {
       const page = pages[index];
       const layer = new TextLayer({
         textContentSource: page.streamTextContent({ includeMarkedContent: true, disableNormalization: true }),
         container: div,
-        viewport: page.getViewport({ scale: 1 }),
+        viewport: page.getViewport({ scale: 1, rotation: turned(page, rotation) }),
       });
       await layer.render();
       // Helps drag-selection behave at the end of the text (as in Firefox's viewer).
       const end = document.createElement("div");
       end.className = "endOfContent";
       div.append(end);
+    },
+    pageToPdfAt(index, rotation) {
+      if (rotation === 0) return pageToPdf[index];
+      const page = pages[index];
+      return Util.inverseTransform(page.getViewport({ scale: 1, rotation: turned(page, rotation) }).transform) as Matrix;
+    },
+    fileRotation(index) {
+      return pages[index].rotate;
     },
     get formsModified() {
       return formsModified;
@@ -349,4 +364,9 @@ function makeLinkService(doc: PDFDocumentProxy, links: LinkHandler) {
     isPageVisible: () => true,
     isPageCached: () => true,
   } as unknown as ConstructorParameters<typeof AnnotationLayer>[0]["linkService"];
+}
+
+/** The page's own rotation plus an extra clockwise turn, as PDF.js expects it. */
+function turned(page: PDFPageProxy, extra: number): number {
+  return (((page.rotate + extra) % 360) + 360) % 360;
 }
