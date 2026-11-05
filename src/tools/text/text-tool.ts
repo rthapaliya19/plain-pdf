@@ -103,7 +103,11 @@ export class TextTool implements Tool {
     if (!this.active || (e.pointerType === "mouse" && e.button !== 0)) return;
     if (this.editor && e.target === this.editor.el) return; // moving the caret
     const page = this.viewer.pageIndexAt(e.clientX, e.clientY);
-    if (page === null) return;
+    if (page === null) {
+      // Tapping the grey area around the pages finishes typing too.
+      this.commit();
+      return;
+    }
     const p = this.viewer.toPagePoint(page, e.clientX, e.clientY);
     const hit = this.textAt(page, p.x, p.y);
     if (hit) {
