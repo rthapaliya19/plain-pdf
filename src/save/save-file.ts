@@ -7,6 +7,8 @@
  * The installed apps (Phase 5) will use their own Save window everywhere.
  */
 
+import { isNativeApp, saveWithSystemDialog } from "../platform/native";
+
 interface SaveFilePickerOptions {
   suggestedName?: string;
   types?: { description: string; accept: Record<string, string[]> }[];
@@ -36,6 +38,11 @@ export function editedName(original: string): string {
  * the person cancels. Must be called straight from a click or key press.
  */
 export async function chooseSaveTarget(suggestedName: string): Promise<SaveTarget | null> {
+  if (isNativeApp) {
+    // The installed app uses the system's own Save window everywhere.
+    const target = await saveWithSystemDialog(suggestedName);
+    return target ? { kind: "file", ...target } : null;
+  }
   const picker = (window as WindowWithPicker).showSaveFilePicker;
   if (picker) {
     try {

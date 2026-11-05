@@ -12,6 +12,7 @@
 import type { EventHub } from "../../core/events";
 import type { PdfDocument } from "../../core/pdf-engine";
 import { icons } from "../../ui/icons";
+import { isNativeApp, openManyWithSystemDialog } from "../../platform/native";
 
 export interface OrganizeActions {
   doc(): PdfDocument | null;
@@ -101,7 +102,7 @@ export class OrganizeScreen {
     rotateRight.addEventListener("click", () => actions.rotate(this.selected(), 90));
     remove.addEventListener("click", () => this.removeSelected());
     save.addEventListener("click", () => void actions.saveSelected(this.selected()));
-    add.addEventListener("click", () => this.fileInput.click());
+    add.addEventListener("click", () => this.chooseFilesToAdd());
     bottom.append(rotateLeft, rotateRight, remove, save, separator(), add);
     this.buttons = { rotateLeft, rotateRight, remove, save, undo, redo, selectAll };
 
@@ -147,6 +148,10 @@ export class OrganizeScreen {
 
   /** Asks to choose PDFs whose pages are added to the end. */
   chooseFilesToAdd(): void {
+    if (isNativeApp) {
+      void openManyWithSystemDialog().then((files) => this.actions.addFiles(files));
+      return;
+    }
     this.fileInput.click();
   }
 

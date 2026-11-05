@@ -1,0 +1,29 @@
+[package]
+name = "plain-pdf"
+version = "1.0.0"
+description = "A private, offline, uncluttered PDF app"
+authors = ["rthapaliya19"]
+license = "MIT"
+repository = "https://github.com/rthapaliya19/plain-pdf"
+edition = "2021"
+rust-version = "1.80"
+
+[lib]
+name = "plain_pdf_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.3", features = [] }
+
+[dependencies]
+tauri = { version = "2.12.4", features = [] }
+tauri-plugin-dialog = "2.8.3"
+tauri-plugin-fs = "2.7.1"
+
+[profile.release]
+# Smaller, faster app.
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

@@ -21,10 +21,17 @@ const CONTENT_SECURITY_POLICY = [
   "frame-src 'none'",
 ].join("; ");
 
+/** Set by Tauri while it builds the installed apps. */
+const buildingNativeApp = Boolean(
+  (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env.TAURI_ENV_PLATFORM,
+);
+
 function privacyLock(): Plugin {
   return {
     name: "plain-pdf-privacy-lock",
-    apply: "build",
+    // The installed apps (Tauri) get the same policy from src-tauri/tauri.conf.json instead,
+    // with the extra address Tauri uses to talk to the app's native part.
+    apply: (_config, env) => env.command === "build" && !buildingNativeApp,
     transformIndexHtml() {
       return [
         {

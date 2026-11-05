@@ -17,6 +17,7 @@ import { TextTool } from "./tools/text/text-tool";
 import { printDocument } from "./tools/print/print";
 import { Search } from "./tools/search/search";
 import { OrganizeScreen } from "./tools/organize/organize-screen";
+import { isNativeApp, openManyWithSystemDialog, openWithSystemDialog, watchSystemOpenRequests } from "./platform/native";
 import { chooseSaveTarget, editedName } from "./save/save-file";
 import { askConfirm, askPassword, showMessage } from "./ui/dialog";
 import { showToast } from "./ui/toast";
@@ -134,7 +135,10 @@ export class App {
       this.tools.deactivate();
       this.organize.open();
     });
-    this.toolbar.moreMenu.add(icons.addFile, "Add pages from another PDF", "", () => this.organize.chooseFilesToAdd());
+    this.toolbar.moreMenu.add(icons.addFile, "Add pages from another PDF", "", () => {
+      if (isNativeApp) void openManyWithSystemDialog().then((files) => this.addPagesFromFiles(files));
+      else this.organize.chooseFilesToAdd();
+    });
     this.toolbar.moreMenu.add(icons.print, "Print", isMac() ? "⌘P" : "Ctrl+P", () => void this.print());
 
     main.append(
@@ -150,6 +154,11 @@ export class App {
 
     this.setUpKeyboard();
     this.setUpDragAndDrop();
+
+    // In the installed app: open the PDF the system asks for (double-click, "Open with").
+    if (isNativeApp) {
+      void watchSystemOpenRequests((file) => void this.openFile(file)).catch((error: unknown) => console.error(error));
+    }
 
     // Warn before closing or reloading the window with unsaved drawings.
     window.addEventListener("beforeunload", (event) => {
@@ -187,6 +196,12 @@ export class App {
   }
 
   chooseFile(): void {
+    if (isNativeApp) {
+      openWithSystemDialog()
+        .then((file) => file && this.openFile(file))
+        .catch((error: unknown) => console.error(error));
+      return;
+    }
     this.fileInput.click();
   }
 
