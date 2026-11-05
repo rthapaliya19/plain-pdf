@@ -23,7 +23,7 @@
 | Highlighter | Yellow and see-through, so text stays readable. Snaps to the words and lines of text you drag over; straight (level-snapping) lines on scans |
 | Eraser | Removes whole strokes. Only erases what was added, never the original PDF |
 | Undo / Redo | For everything added |
-| Signature | Draw once with finger, mouse or trackpad. Remembered on the device. Tap to place, drag to move, drag a corner to resize. Redraw or delete anytime. No PIN |
+| Signature | Blue ink. Draw once with finger, mouse or trackpad. Remembered on the device. Appears in the middle of the visible page; drag to move, drag the corner to resize, × to remove. Redraw or remove the saved one anytime. No PIN, no date |
 | Save | Always saves a copy, named "name-edited.pdf" by default, using a Save dialog where possible. Additions are locked into the page. The original is untouched |
 
 On phones, with the pen active, one finger draws and two fingers scroll and zoom.

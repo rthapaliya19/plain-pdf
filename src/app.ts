@@ -10,6 +10,7 @@ import { TextLayoutCache } from "./core/text-layout";
 import { ToolManager } from "./core/tools";
 import { OverlayRenderer } from "./overlay/overlay-renderer";
 import { DrawTool } from "./tools/draw/draw-tool";
+import { SignatureController } from "./tools/sign/signature-controller";
 import { askConfirm, askPassword, showMessage } from "./ui/dialog";
 import { icons } from "./ui/icons";
 import { Toolbar } from "./ui/toolbar";
@@ -43,10 +44,15 @@ export class App {
     const renderer = new OverlayRenderer(this.viewer, this.additions, this.hub);
     const drawTool = new DrawTool(this.viewer, this.additions, this.history, renderer, () => this.textLayout);
     this.tools.register(drawTool);
+    const signatures = new SignatureController(this.viewer, this.additions, this.history, renderer, this.hub);
 
     this.toolbar = new Toolbar(this.hub, {
       open: () => this.chooseFile(),
       toggleDraw: () => this.tools.toggle("draw"),
+      sign: () => {
+        this.tools.deactivate();
+        void signatures.start();
+      },
       undo: () => this.history.undo(),
       redo: () => this.history.redo(),
       zoomIn: () => this.viewer.zoomIn(),

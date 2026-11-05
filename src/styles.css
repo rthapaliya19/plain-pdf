@@ -256,7 +256,6 @@ input:focus-visible {
 .page-overlay {
   position: absolute;
   inset: 0;
-  overflow: hidden;
 }
 
 .layer {
@@ -272,6 +271,80 @@ input:focus-visible {
 .layer-boxes {
   position: absolute;
   inset: 0;
+  pointer-events: none;
+}
+
+.sig-box {
+  position: absolute;
+  pointer-events: auto;
+  /* Dragging a signature moves it instead of scrolling the page. */
+  touch-action: none;
+  cursor: grab;
+  border-radius: 4px;
+}
+
+.sig-box:hover {
+  outline: 1px dashed rgb(37 99 235 / 0.5);
+}
+
+.sig-box.selected {
+  outline: 2px dashed var(--accent);
+  outline-offset: 2px;
+}
+
+.sig-box:active {
+  cursor: grabbing;
+}
+
+.sig-delete,
+.sig-handle {
+  position: absolute;
+  display: none;
+}
+
+.sig-box.selected .sig-delete,
+.sig-box.selected .sig-handle {
+  display: grid;
+}
+
+.sig-delete {
+  top: -14px;
+  right: -14px;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: #b91c1c;
+  font-size: 18px;
+  line-height: 1;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+}
+
+.sig-handle {
+  right: -10px;
+  bottom: -10px;
+  width: 20px;
+  height: 20px;
+  border: 3px solid #ffffff;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: var(--shadow);
+  cursor: nwse-resize;
+}
+
+/* A bigger invisible target for fingers. */
+.sig-handle::after,
+.sig-delete::after {
+  content: "";
+  position: absolute;
+  inset: -12px;
+}
+
+.viewer.drawing .sig-box {
   pointer-events: none;
 }
 
@@ -515,6 +588,135 @@ input:focus-visible {
   margin-top: 16px;
 }
 
+.button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.button.danger-text {
+  border-color: transparent;
+  background: transparent;
+  color: #b91c1c;
+}
+
+.button.danger-text:hover {
+  background: #fef2f2;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.dialog-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.dialog-close:hover {
+  background: var(--hover);
+}
+
+.signature-dialog {
+  position: fixed;
+  width: min(600px, calc(100vw - 24px));
+}
+
+.signature-dialog .dialog-actions {
+  flex-wrap: wrap;
+}
+
+.signature-pad {
+  position: relative;
+  height: min(220px, calc((100vw - 64px) / 2.4));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fbfcfd;
+  /* Drawing here never scrolls or zooms the page. */
+  touch-action: none;
+  cursor: crosshair;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.signature-pad svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.signature-line {
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  bottom: 26%;
+  border-bottom: 1.5px solid #c7cdd4;
+}
+
+.signature-hint {
+  position: absolute;
+  left: 6%;
+  bottom: calc(26% - 24px);
+  color: var(--muted);
+  font-size: 0.85rem;
+  pointer-events: none;
+}
+
+.signature-preview {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 150px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fbfcfd;
+  cursor: pointer;
+}
+
+.signature-preview:hover {
+  border-color: var(--accent);
+}
+
+.signature-preview svg {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+/* ---------- Toast ---------- */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(24px + var(--bottom-bar, 0px));
+  z-index: 50;
+  max-width: calc(100vw - 32px);
+  padding: 10px 16px;
+  transform: translateX(-50%);
+  border-radius: 10px;
+  background: #1f2937;
+  color: #ffffff;
+  font-size: 0.9rem;
+  box-shadow: 0 6px 20px rgb(15 23 42 / 0.25);
+  transition: opacity 0.3s;
+  pointer-events: none;
+}
+
+.toast.leaving {
+  opacity: 0;
+}
+
 .text-input {
   width: 100%;
   height: 40px;
@@ -565,7 +767,7 @@ input:focus-visible {
     flex-direction: column;
     gap: 2px;
     height: 52px;
-    min-width: 72px;
+    min-width: 64px;
     font-size: 12px;
   }
 

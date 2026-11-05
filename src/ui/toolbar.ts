@@ -9,6 +9,7 @@ import { icons } from "./icons";
 export interface ToolbarActions {
   open(): void;
   toggleDraw(): void;
+  sign(): void;
   undo(): void;
   redo(): void;
   zoomIn(): void;
@@ -25,6 +26,7 @@ export class Toolbar {
   private readonly fileName: HTMLSpanElement;
   private readonly toolGroup: HTMLDivElement;
   private readonly drawButton: HTMLButtonElement;
+  private readonly signButton: HTMLButtonElement;
   private readonly undoButton: HTMLButtonElement;
   private readonly redoButton: HTMLButtonElement;
   private readonly docControls: HTMLDivElement;
@@ -46,6 +48,9 @@ export class Toolbar {
     this.drawButton.classList.add("tool-button");
     this.drawButton.setAttribute("aria-pressed", "false");
     this.drawButton.addEventListener("click", () => actions.toggleDraw());
+    this.signButton = iconButton(icons.sign, "Sign", "Add your signature");
+    this.signButton.classList.add("tool-button");
+    this.signButton.addEventListener("click", () => actions.sign());
     this.undoButton = iconButton(icons.undo, "Undo", `Undo (${MOD}+Z)`);
     this.undoButton.addEventListener("click", () => actions.undo());
     this.redoButton = iconButton(icons.redo, "Redo", isMac ? "Redo (Cmd+Shift+Z)" : "Redo (Ctrl+Y)");
@@ -55,7 +60,7 @@ export class Toolbar {
     this.toolGroup = document.createElement("div");
     this.toolGroup.className = "tool-group";
     this.toolGroup.hidden = true;
-    this.toolGroup.append(this.drawButton, separator(), this.undoButton, this.redoButton);
+    this.toolGroup.append(this.drawButton, this.signButton, separator(), this.undoButton, this.redoButton);
 
     this.fileName = document.createElement("span");
     this.fileName.className = "file-name";
