@@ -233,6 +233,10 @@ input:focus-visible {
 }
 
 .viewer {
+  /* Used by the PDF.js form field layer. */
+  --user-unit: 1;
+  --scale-round-x: 1px;
+  --scale-round-y: 1px;
   position: absolute;
   inset: 0;
   overflow: auto;
@@ -278,6 +282,16 @@ input:focus-visible {
 .page-overlay {
   position: absolute;
   inset: 0;
+  /* Let taps reach form fields and links underneath; boxes and the text editor opt back in. */
+  pointer-events: none;
+}
+
+/* While drawing or adding text, form fields and links don't react. */
+.viewer.drawing .annotationLayer,
+.viewer.drawing .annotationLayer *,
+.viewer.texting .annotationLayer,
+.viewer.texting .annotationLayer * {
+  pointer-events: none !important;
 }
 
 .layer {

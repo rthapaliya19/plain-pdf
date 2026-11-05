@@ -66,7 +66,7 @@ export class SignatureController {
     window.addEventListener("keydown", (e) => {
       const id = this.renderer.selectedSignature;
       if (!id || document.querySelector("dialog[open]")) return;
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
       if (e.key === "Delete" || e.key === "Backspace") {
         e.preventDefault();
         this.remove(id);

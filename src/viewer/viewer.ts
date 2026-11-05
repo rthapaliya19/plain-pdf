@@ -7,7 +7,7 @@
  * Later features (pen, highlighter, signature) draw into that layer.
  */
 import type { EventHub } from "../core/events";
-import type { PdfDocument, RenderJob } from "../core/pdf-engine";
+import type { LinkHandler, PdfDocument, RenderJob } from "../core/pdf-engine";
 import { attachZoomGestures } from "./gestures";
 import { MAX_ZOOM, MIN_ZOOM, clampZoom as clamp, type ZoomAnchor } from "./zoom";
 
@@ -22,6 +22,9 @@ const RENDER_CONCURRENCY = 2;
 interface PageView {
   index: number;
   el: HTMLDivElement;
+  /** Fillable form fields and clickable links. */
+  interactive: HTMLDivElement;
+  interactiveDone: boolean;
   overlay: HTMLDivElement;
   canvas: HTMLCanvasElement | null;
   renderedAt: number; // pixels-per-point the current canvas was drawn at, 0 = none
@@ -42,6 +45,7 @@ export class Viewer {
   private renderTimer = 0;
   private scrollFrame = 0;
   private activeJobs = 0;
+  private links: LinkHandler = { goToPage: (i) => this.goToPage(i + 1), openExternal: () => {} };
 
   constructor(private readonly hub: EventHub) {
     this.element = document.createElement("div");
@@ -75,6 +79,11 @@ export class Viewer {
 
   get pageCount(): number {
     return this.pages.length;
+  }
+
+  /** Decides what links inside the PDF do (the app asks before opening web links). */
+  setLinkHandler(handler: LinkHandler): void {
+    this.links = handler;
   }
 
   /** The page being read (0-based). */
@@ -132,7 +141,11 @@ export class Viewer {
 
   /** Keeps the CSS variable --pt (screen pixels per PDF point) up to date, for text boxes. */
   private updatePointSize(): void {
-    this.element.style.setProperty("--pt", `${this.cssPixelsPerPoint}px`);
+    const ppp = `${this.cssPixelsPerPoint}`;
+    this.element.style.setProperty("--pt", `${ppp}px`);
+    // Used by the PDF.js form field layer to size itself.
+    this.element.style.setProperty("--scale-factor", ppp);
+    this.element.style.setProperty("--total-scale-factor", ppp);
   }
 
   /** Shows a newly opened document, replacing any previous one. */
@@ -154,11 +167,13 @@ export class Viewer {
       el.className = "page";
       el.dataset.page = String(index + 1);
       el.setAttribute("aria-label", `Page ${index + 1}`);
+      const interactive = document.createElement("div");
+      interactive.className = "annotationLayer";
       const overlay = document.createElement("div");
       overlay.className = "page-overlay";
-      el.append(overlay);
+      el.append(interactive, overlay);
       fragment.append(el);
-      return { index, el, overlay, canvas: null, renderedAt: 0, job: null, near: false };
+      return { index, el, interactive, interactiveDone: false, overlay, canvas: null, renderedAt: 0, job: null, near: false };
     });
     this.pagesEl.append(fragment);
     this.layout();
@@ -365,6 +380,13 @@ export class Viewer {
         else page.el.prepend(canvas);
         page.canvas = canvas;
         page.renderedAt = pixelsPerPoint;
+        if (!page.interactiveDone) {
+          // Form fields and links are added once and kept (they hold what you typed).
+          page.interactiveDone = true;
+          doc.renderInteractive(page.index, page.interactive, this.links).catch((error: unknown) => {
+            console.error(`Couldn't set up form fields on page ${page.index + 1}`, error);
+          });
+        }
       })
       .catch((error: unknown) => {
         if (error instanceof Error && error.name === "RenderingCancelledException") return;

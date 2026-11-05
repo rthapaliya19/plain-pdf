@@ -4,6 +4,8 @@
  * can be upgraded or swapped without touching the rest of the code.
  */
 import {
+  AnnotationLayer,
+  AnnotationMode,
   GlobalWorkerOptions,
   PasswordResponses,
   Util,
@@ -46,6 +48,14 @@ export interface RenderJob {
   cancel(): void;
 }
 
+/** What happens when a link inside the PDF is clicked. */
+export interface LinkHandler {
+  /** Jump to page `index` (0-based) of this document. */
+  goToPage(index: number): void;
+  /** A web or email link: the app asks before opening it. */
+  openExternal(url: string): void;
+}
+
 /** A 2D transform [a, b, c, d, e, f], as used in PDF files. */
 export type Matrix = [number, number, number, number, number, number];
 
@@ -65,6 +75,19 @@ export interface PdfDocument {
   renderPage(index: number, canvas: HTMLCanvasElement, pixelsPerPoint: number): RenderJob;
   /** Where the text on page `index` (0-based) sits. Used to make highlights follow the text. */
   textFragments(index: number): Promise<TextFragment[]>;
+  /**
+   * Adds the page's fillable form fields and clickable links into `div`
+   * (an element covering the page). Sizes follow the CSS variable
+   * --total-scale-factor, so zooming needs no redraw.
+   */
+  renderInteractive(index: number, div: HTMLDivElement, links: LinkHandler): Promise<void>;
+  /** True once any form field has been filled in or changed. */
+  readonly formsModified: boolean;
+  onFormsChanged(callback: () => void): void;
+  /** Old-style Adobe forms (XFA) that can't be filled here. */
+  readonly isXfaForm: boolean;
+  /** The file with the current form answers written in (for saving). */
+  bytesWithFormValues(): Promise<Uint8Array>;
   close(): Promise<void>;
 }
 
@@ -140,6 +163,13 @@ export async function openPdf(bytes: Uint8Array, askPassword: PasswordPrompt): P
     pageSizes.push({ width: viewport.width, height: viewport.height });
     pageToPdf.push(Util.inverseTransform(viewport.transform) as Matrix);
   }
+  let fieldObjects: Promise<Map<string, object[]> | null> | undefined;
+  let formsModified = false;
+  const formListeners: (() => void)[] = [];
+  (doc.annotationStorage as unknown as { onSetModified: () => void }).onSetModified = () => {
+    formsModified = true;
+    formListeners.forEach((f) => f());
+  };
   const { info } = await doc.getMetadata().catch(() => ({ info: {} }));
   const encrypted = Boolean((info as { EncryptFilterName?: string | null }).EncryptFilterName);
 
@@ -153,7 +183,8 @@ export async function openPdf(bytes: Uint8Array, askPassword: PasswordPrompt): P
       const viewport = page.getViewport({ scale: pixelsPerPoint });
       canvas.width = Math.max(1, Math.floor(viewport.width));
       canvas.height = Math.max(1, Math.floor(viewport.height));
-      const task = page.render({ canvas, viewport, background: "#ffffff" });
+      // Form fields are drawn as real input boxes on top (see renderInteractive), not on the canvas.
+      const task = page.render({ canvas, viewport, background: "#ffffff", annotationMode: AnnotationMode.ENABLE_FORMS });
       return {
         promise: task.promise,
         cancel: () => task.cancel(),
@@ -175,8 +206,101 @@ export async function openPdf(bytes: Uint8Array, askPassword: PasswordPrompt): P
       }
       return fragments;
     },
+    async renderInteractive(index, div, links) {
+      const page = pages[index];
+      const annotations = await page.getAnnotations({ intent: "display" });
+      if (annotations.length === 0) return;
+      fieldObjects ??= doc.getFieldObjects().catch(() => null);
+      const viewport = page.getViewport({ scale: 1 }).clone({ dontFlip: true });
+      const linkService = makeLinkService(doc, links);
+      const layer = new AnnotationLayer({
+        div,
+        accessibilityManager: null,
+        annotationCanvasMap: null,
+        annotationEditorUIManager: null,
+        page,
+        viewport,
+        structTreeLayer: null,
+        commentManager: null,
+        linkService,
+        annotationStorage: doc.annotationStorage,
+      });
+      await layer.render({
+        viewport,
+        div,
+        annotations,
+        page,
+        linkService,
+        annotationStorage: doc.annotationStorage,
+        renderForms: true,
+        enableScripting: false,
+        hasJSActions: false,
+        fieldObjects: await fieldObjects,
+        imageResourcesPath: "",
+      } as Parameters<AnnotationLayer["render"]>[0]);
+    },
+    get formsModified() {
+      return formsModified;
+    },
+    onFormsChanged(callback) {
+      formListeners.push(callback);
+    },
+    isXfaForm: Boolean((doc as unknown as { isPureXfa?: boolean }).isPureXfa),
+    async bytesWithFormValues() {
+      return doc.saveDocument();
+    },
     async close() {
       await task.destroy();
     },
   };
+}
+
+/** The small "link service" PDF.js needs, wired to the app's own page jumping and link confirmation. */
+function makeLinkService(doc: PDFDocumentProxy, links: LinkHandler) {
+  const goTo = async (dest: unknown) => {
+    try {
+      const explicit = typeof dest === "string" ? await doc.getDestination(dest) : (dest as unknown[]);
+      if (!Array.isArray(explicit) || explicit.length === 0) return;
+      const ref = explicit[0];
+      const index =
+        typeof ref === "number" ? ref : await doc.getPageIndex(ref as Parameters<PDFDocumentProxy["getPageIndex"]>[0]);
+      links.goToPage(index);
+    } catch {
+      // A broken link: do nothing.
+    }
+  };
+  return {
+    externalLinkEnabled: true,
+    isInPresentationMode: false,
+    get pagesCount() {
+      return doc.numPages;
+    },
+    page: 1,
+    rotation: 0,
+    addLinkAttributes(link: HTMLAnchorElement, url: string) {
+      link.href = url;
+      link.rel = "noopener noreferrer nofollow";
+      link.target = "_blank";
+      link.title = url;
+      link.onclick = (event) => {
+        event.preventDefault();
+        links.openExternal(url);
+        return false;
+      };
+    },
+    getDestinationHash: () => "#",
+    getAnchorUrl: (hash: string) => `#${hash}`,
+    goToDestination: goTo,
+    goToPage: (n: number) => links.goToPage(n - 1),
+    goToXY: (n: number) => links.goToPage(n - 1),
+    executeNamedAction(action: string) {
+      if (action === "FirstPage") links.goToPage(0);
+      else if (action === "LastPage") links.goToPage(doc.numPages - 1);
+    },
+    executeSetOCGState() {},
+    setHash() {},
+    cachePageRef() {},
+    isPageVisible: () => true,
+    isPageCached: () => true,
+  } as unknown as ConstructorParameters<typeof AnnotationLayer>[0]["linkService"];
 }

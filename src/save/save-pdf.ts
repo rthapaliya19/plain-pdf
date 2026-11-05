@@ -62,6 +62,7 @@ export async function saveWithAdditions(
   original: Uint8Array,
   additions: Addition[],
   pageToPdf: readonly Matrix[],
+  options: { lockForms?: boolean } = {},
 ): Promise<Uint8Array> {
   let doc: PDFDocument;
   try {
@@ -71,6 +72,16 @@ export async function saveWithAdditions(
   } catch (error) {
     if (error instanceof Error && error.name === "EncryptedPDFError") throw new EncryptedPdfError();
     throw error;
+  }
+
+  if (options.lockForms) {
+    // Filled-in form answers become part of the page, like everything else.
+    try {
+      doc.getForm().flatten({ updateFieldAppearances: false });
+    } catch (error) {
+      // Some unusual forms can't be locked; their answers are still saved (editable).
+      console.info("Form answers saved but not locked:", error);
+    }
   }
 
   const pages = doc.getPages();

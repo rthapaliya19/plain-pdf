@@ -95,7 +95,7 @@ Decisions:
 ## Progress (for picking up where work stopped)
 
 - [x] Phases 0-4: viewer, draw, highlighter, signature and initials, save a copy
-- [ ] Round A: add text
+- [x] Round A: add text
 - [ ] Round A: fill forms and links
 - [ ] Round A: check-in
 - [ ] Round B: select and copy text

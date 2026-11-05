@@ -120,12 +120,25 @@ export class App {
 
     this.hub.on("additions:changed", () => {
       this.dirty = true;
-      this.toolbar.setSaveEnabled(this.additions.size > 0);
+      this.toolbar.setSaveEnabled(this.hasChanges);
+    });
+
+    this.viewer.setLinkHandler({
+      goToPage: (index) => this.viewer.goToPage(index + 1),
+      openExternal: async (url) => {
+        const open = await askConfirm("Open this link in your browser?", url, "Open link", "Cancel");
+        if (open) window.open(url, "_blank", "noopener,noreferrer");
+      },
     });
   }
 
+  /** Something was added or a form was filled in. */
+  private get hasChanges(): boolean {
+    return this.additions.size > 0 || Boolean(this.current?.doc.formsModified);
+  }
+
   private get hasUnsavedChanges(): boolean {
-    return this.dirty && this.additions.size > 0;
+    return this.dirty && this.hasChanges;
   }
 
   /** The currently open file, if any. */
@@ -165,7 +178,16 @@ export class App {
       this.additions.clear();
       this.history.clear();
       this.dirty = false;
+      doc.onFormsChanged(() => {
+        if (this.current?.doc !== doc) return;
+        this.dirty = true;
+        this.toolbar.setSaveEnabled(true);
+      });
       this.viewer.show(doc);
+      this.toolbar.setSaveEnabled(false);
+      if (doc.isXfaForm) {
+        showToast("This form uses an older Adobe format (XFA) that Plain PDF can't fill in.", 7000);
+      }
       this.startScreen.hidden = true;
       document.title = `${file.name} - Plain PDF`;
       this.hub.emit("document:opened", { name: file.name, pageCount: doc.pageCount });
@@ -190,8 +212,8 @@ export class App {
   async save(): Promise<void> {
     const file = this.current;
     if (!file || this.saving) return;
-    if (this.additions.size === 0) {
-      showToast("Nothing to save yet. Draw, highlight or sign first.");
+    if (!this.hasChanges) {
+      showToast("Nothing to save yet. Draw, type, highlight, sign or fill in a form first.");
       return;
     }
     if (file.doc.encrypted) {
@@ -211,7 +233,9 @@ export class App {
     try {
       // The saving code (pdf-lib) is only loaded the first time you save.
       const { saveWithAdditions } = await import("./save/save-pdf");
-      const bytes = await saveWithAdditions(file.bytes, this.additions.all(), file.doc.pageToPdf);
+      const filledForms = file.doc.formsModified;
+      const base = filledForms ? await file.doc.bytesWithFormValues() : file.bytes;
+      const bytes = await saveWithAdditions(base, this.additions.all(), file.doc.pageToPdf, { lockForms: filledForms });
       await target.write(bytes);
       if (this.current === file) this.dirty = false;
       showToast(
@@ -267,7 +291,10 @@ export class App {
   private setUpKeyboard(): void {
     window.addEventListener("keydown", (event) => {
       if (document.querySelector("dialog[open]")) return;
-      const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement;
+      const typing =
+        event.target instanceof HTMLInputElement ||
+        event.target instanceof HTMLTextAreaElement ||
+        event.target instanceof HTMLSelectElement;
       if (event.key === "Escape" && !typing) {
         this.tools.deactivate();
         return;
