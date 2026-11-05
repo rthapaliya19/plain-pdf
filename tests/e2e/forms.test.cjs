@@ -74,6 +74,15 @@ const box = (page, sel) => page.$eval(sel, (el) => { const r = el.getBoundingCli
   await page.keyboard.type("Call after 5pm");
   await page.mouse.click(pg.x + 500 * s, pg.y + 100 * s); // click away
   check("filling a form enables Save", !(await page.isDisabled("button.save-button")));
+  const shown = await page.evaluate(() => {
+    const visible = (sel) => [...document.querySelectorAll(sel)].some((c) => getComputedStyle(c).display !== "none" && c.getBoundingClientRect().width > 0);
+    return {
+      checkbox: visible('.buttonWidgetAnnotation.checkBox canvas[data-canvas-name="checked"]'),
+      radio: visible('.buttonWidgetAnnotation.radioButton canvas[data-canvas-name="checked"]'),
+    };
+  });
+  check("a ticked checkbox shows its tick on screen", shown.checkbox);
+  check("the chosen radio button shows as chosen on screen", shown.radio);
   await page.screenshot({ path: `${SHOTS}/f-d1-filled.png` });
 
   // Typing in a field doesn't trigger the app's shortcuts.

@@ -96,7 +96,7 @@ Decisions:
 
 - [x] Phases 0-4: viewer, draw, highlighter, signature and initials, save a copy
 - [x] Round A: add text
-- [ ] Round A: fill forms and links
+- [x] Round A: fill forms and links
 - [ ] Round A: check-in
 - [ ] Round B: select and copy text
 - [ ] Round B: search

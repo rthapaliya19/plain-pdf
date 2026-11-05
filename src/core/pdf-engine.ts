@@ -164,6 +164,10 @@ export async function openPdf(bytes: Uint8Array, askPassword: PasswordPrompt): P
     pageToPdf.push(Util.inverseTransform(viewport.transform) as Matrix);
   }
   let fieldObjects: Promise<Map<string, object[]> | null> | undefined;
+  // Checkboxes and radio buttons are drawn as small separate pictures during
+  // page drawing, then placed into the form layer (one map and layer per page).
+  const fieldCanvases = pages.map(() => new Map<string, HTMLCanvasElement>());
+  const formLayers: (AnnotationLayer | null)[] = pages.map(() => null);
   let formsModified = false;
   const formListeners: (() => void)[] = [];
   (doc.annotationStorage as unknown as { onSetModified: () => void }).onSetModified = () => {
@@ -184,9 +188,15 @@ export async function openPdf(bytes: Uint8Array, askPassword: PasswordPrompt): P
       canvas.width = Math.max(1, Math.floor(viewport.width));
       canvas.height = Math.max(1, Math.floor(viewport.height));
       // Form fields are drawn as real input boxes on top (see renderInteractive), not on the canvas.
-      const task = page.render({ canvas, viewport, background: "#ffffff", annotationMode: AnnotationMode.ENABLE_FORMS });
+      const task = page.render({
+        canvas,
+        viewport,
+        background: "#ffffff",
+        annotationMode: AnnotationMode.ENABLE_FORMS,
+        annotationCanvasMap: fieldCanvases[index],
+      });
       return {
-        promise: task.promise,
+        promise: task.promise.then(() => formLayers[index]?.refreshCanvases()),
         cancel: () => task.cancel(),
       };
     },
@@ -216,7 +226,7 @@ export async function openPdf(bytes: Uint8Array, askPassword: PasswordPrompt): P
       const layer = new AnnotationLayer({
         div,
         accessibilityManager: null,
-        annotationCanvasMap: null,
+        annotationCanvasMap: fieldCanvases[index],
         annotationEditorUIManager: null,
         page,
         viewport,
@@ -237,7 +247,9 @@ export async function openPdf(bytes: Uint8Array, askPassword: PasswordPrompt): P
         hasJSActions: false,
         fieldObjects: await fieldObjects,
         imageResourcesPath: "",
+        annotationCanvasMap: fieldCanvases[index],
       } as Parameters<AnnotationLayer["render"]>[0]);
+      formLayers[index] = layer;
     },
     get formsModified() {
       return formsModified;
