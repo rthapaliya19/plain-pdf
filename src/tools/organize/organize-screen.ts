@@ -445,6 +445,7 @@ function textButton(icon: string, label: string, className: string): HTMLButtonE
   b.type = "button";
   b.className = className;
   b.title = label;
+  b.dataset.action = label;
   b.innerHTML = icon;
   const text = document.createElement("span");
   text.className = "button-label";
