@@ -17,6 +17,7 @@ import {
   PDFName,
   PDFTextField,
   StandardFonts,
+  degrees,
   type PDFFont,
   type PDFOperator,
   type PDFPage,
@@ -79,6 +80,76 @@ export async function saveWithAdditions(
 
   if (options.lockForms) lockFormAnswers(doc);
 
+  await drawAdditions(doc, additions, pageToPdf);
+  return doc.save();
+}
+
+/**
+ * Builds a new PDF from pages of one or more files, in a new order and with
+ * extra rotation (after organizing pages or adding pages from other files),
+ * then draws the additions. Form answers are locked into each file's pages
+ * first, since fillable fields don't survive being moved between files.
+ */
+export async function saveWorkspace(
+  sources: { bytes: Uint8Array }[],
+  plan: readonly { source: number; index: number; rotation: number }[],
+  additions: Addition[],
+  pageToPdf: readonly Matrix[],
+): Promise<Uint8Array> {
+  const docs: PDFDocument[] = [];
+  for (const source of sources) {
+    let src: PDFDocument;
+    try {
+      src = await PDFDocument.load(source.bytes, { updateMetadata: false });
+    } catch (error) {
+      if (error instanceof Error && error.name === "EncryptedPDFError") throw new EncryptedPdfError();
+      throw error;
+    }
+    if (src.getForm().getFields().length > 0) lockFormAnswers(src);
+    docs.push(src);
+  }
+
+  const out = await PDFDocument.create({ updateMetadata: false });
+  copyDetails(docs[0], out);
+  // Copy each file's pages in one go (shared fonts and images are copied once).
+  const copies = new Map<string, PDFPage>();
+  for (let s = 0; s < docs.length; s++) {
+    const wanted = [...new Set(plan.filter((e) => e.source === s).map((e) => e.index))];
+    if (wanted.length === 0) continue;
+    const pages = await out.copyPages(docs[s], wanted);
+    wanted.forEach((index, i) => copies.set(`${s}:${index}`, pages[i]));
+  }
+  for (const entry of plan) {
+    const page = copies.get(`${entry.source}:${entry.index}`)!;
+    page.setRotation(degrees((((page.getRotation().angle + entry.rotation) % 360) + 360) % 360));
+    out.addPage(page);
+  }
+  await drawAdditions(out, additions, pageToPdf);
+  return out.save();
+}
+
+/** Keeps the original file's details (title, author, dates...) on a rebuilt file. */
+function copyDetails(from: PDFDocument, to: PDFDocument): void {
+  const title = from.getTitle();
+  const author = from.getAuthor();
+  const subject = from.getSubject();
+  const keywords = from.getKeywords();
+  const creator = from.getCreator();
+  const producer = from.getProducer();
+  const created = from.getCreationDate();
+  const modified = from.getModificationDate();
+  if (title) to.setTitle(title);
+  if (author) to.setAuthor(author);
+  if (subject) to.setSubject(subject);
+  if (keywords) to.setKeywords([keywords]);
+  if (creator) to.setCreator(creator);
+  if (producer) to.setProducer(producer);
+  if (created) to.setCreationDate(created);
+  if (modified) to.setModificationDate(modified);
+}
+
+/** Draws every addition onto its page. `pageToPdf[i]` places page i's additions. */
+async function drawAdditions(doc: PDFDocument, additions: Addition[], pageToPdf: readonly Matrix[]): Promise<void> {
   const pages = doc.getPages();
   // Typed text uses Helvetica, a font every PDF reader has built in.
   const helvetica = additions.some((a) => a.kind === "text") ? await doc.embedFont(StandardFonts.Helvetica) : null;
@@ -110,8 +181,6 @@ export async function saveWithAdditions(
     ops.push(popGraphicsState());
     page.pushOperators(...ops);
   }
-
-  return doc.save();
 }
 
 /**
