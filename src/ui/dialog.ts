@@ -42,6 +42,28 @@ export function showMessage(title: string, message: string): Promise<void> {
   });
 }
 
+/** Asks a yes/no question. Resolves to true if the confirm button was chosen. */
+export function askConfirm(title: string, message: string, confirmLabel: string, cancelLabel: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const dialog = createDialog();
+    const cancel = button(cancelLabel, false);
+    const confirm = button(confirmLabel, true);
+    const actions = document.createElement("div");
+    actions.className = "dialog-actions";
+    actions.append(cancel, confirm);
+    dialog.append(heading(title), paragraph(message), actions);
+    let result = false;
+    cancel.addEventListener("click", () => dialog.close());
+    confirm.addEventListener("click", () => {
+      result = true;
+      dialog.close();
+    });
+    dialog.addEventListener("close", () => resolve(result));
+    dialog.showModal();
+    cancel.focus();
+  });
+}
+
 /** Asks for a PDF's password. Resolves to null if cancelled. */
 export function askPassword(wasWrong: boolean): Promise<string | null> {
   return new Promise((resolve) => {

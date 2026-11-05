@@ -2,9 +2,14 @@
  * Wires the app together: toolbar, viewer, start screen, opening files
  * (button, keyboard shortcut, drag and drop) and error messages.
  */
+import { Additions } from "./core/additions";
 import { EventHub } from "./core/events";
+import { History } from "./core/history";
 import { NotAPdfError, PasswordCancelledError, openPdf, type PdfDocument } from "./core/pdf-engine";
-import { askPassword, showMessage } from "./ui/dialog";
+import { ToolManager } from "./core/tools";
+import { OverlayRenderer } from "./overlay/overlay-renderer";
+import { DrawTool } from "./tools/draw/draw-tool";
+import { askConfirm, askPassword, showMessage } from "./ui/dialog";
 import { icons } from "./ui/icons";
 import { Toolbar } from "./ui/toolbar";
 import { Viewer } from "./viewer/viewer";
@@ -19,6 +24,10 @@ export interface OpenFile {
 export class App {
   readonly hub = new EventHub();
   private readonly viewer = new Viewer(this.hub);
+  /** What the person added on top of the PDF, with undo/redo. */
+  private readonly additions = new Additions(this.hub);
+  private readonly history = new History(this.hub);
+  private readonly tools = new ToolManager(this.hub);
   private readonly toolbar: Toolbar;
   private readonly startScreen: HTMLElement;
   private readonly busy: HTMLElement;
@@ -28,8 +37,15 @@ export class App {
   private openCounter = 0;
 
   constructor(root: HTMLElement) {
+    const renderer = new OverlayRenderer(this.viewer, this.additions, this.hub);
+    const drawTool = new DrawTool(this.viewer, this.additions, this.history, renderer);
+    this.tools.register(drawTool);
+
     this.toolbar = new Toolbar(this.hub, {
       open: () => this.chooseFile(),
+      toggleDraw: () => this.tools.toggle("draw"),
+      undo: () => this.history.undo(),
+      redo: () => this.history.redo(),
       zoomIn: () => this.viewer.zoomIn(),
       zoomOut: () => this.viewer.zoomOut(),
       fitToWidth: () => this.viewer.fitToWidth(),
@@ -54,11 +70,16 @@ export class App {
 
     const main = document.createElement("main");
     main.className = "main";
-    main.append(this.viewer.element, this.startScreen, this.busy, this.dropHint);
+    main.append(this.viewer.element, drawTool.options.element, this.startScreen, this.busy, this.dropHint);
     root.append(this.toolbar.element, main, this.fileInput);
 
     this.setUpKeyboard();
     this.setUpDragAndDrop();
+
+    // Warn before closing or reloading the window with unsaved drawings.
+    window.addEventListener("beforeunload", (event) => {
+      if (this.additions.size > 0) event.preventDefault();
+    });
   }
 
   /** The currently open file, if any. */
@@ -71,6 +92,15 @@ export class App {
   }
 
   async openFile(file: File): Promise<void> {
+    if (this.current && this.additions.size > 0) {
+      const discard = await askConfirm(
+        "Discard your changes?",
+        `Your drawings on "${this.current.name}" haven't been saved. Opening another file will discard them.`,
+        "Discard and open",
+        "Keep editing",
+      );
+      if (!discard) return;
+    }
     const ticket = ++this.openCounter;
     this.busy.querySelector("p")!.textContent = `Opening ${file.name}…`;
     this.busy.hidden = false;
@@ -84,6 +114,9 @@ export class App {
       }
       const previous = this.current;
       this.current = { name: file.name, bytes, doc };
+      this.tools.deactivate();
+      this.additions.clear();
+      this.history.clear();
       this.viewer.show(doc);
       this.startScreen.hidden = true;
       document.title = `${file.name} - Plain PDF`;
@@ -136,10 +169,20 @@ export class App {
 
   private setUpKeyboard(): void {
     window.addEventListener("keydown", (event) => {
+      if (document.querySelector("dialog[open]")) return;
+      const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement;
+      if (event.key === "Escape" && !typing) {
+        this.tools.deactivate();
+        return;
+      }
       const mod = event.ctrlKey || event.metaKey;
       if (!mod || event.altKey) return;
       const key = event.key.toLowerCase();
-      if (key === "o") {
+      if ((key === "z" || key === "y") && !typing) {
+        event.preventDefault();
+        if (key === "y" || event.shiftKey) this.history.redo();
+        else this.history.undo();
+      } else if (key === "o") {
         event.preventDefault();
         this.chooseFile();
       } else if (key === "=" || key === "+") {

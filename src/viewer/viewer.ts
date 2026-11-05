@@ -77,6 +77,49 @@ export class Viewer {
     return this.pages.length;
   }
 
+  /** Current on-screen size of one PDF point, in CSS pixels. */
+  get cssPixelsPerPoint(): number {
+    return this.zoom * CSS_PER_POINT;
+  }
+
+  // ---------- Helpers for tools that draw on pages ----------
+
+  /** Size of page `index` (0-based) in PDF points. */
+  pageSize(index: number): { width: number; height: number } {
+    return this.doc!.pageSizes[index];
+  }
+
+  /** The layer on top of page `index` where additions are shown. */
+  overlay(index: number): HTMLDivElement | null {
+    return this.pages[index]?.overlay ?? null;
+  }
+
+  /** The page (0-based) under a point on screen, or null if there is none. */
+  pageIndexAt(clientX: number, clientY: number): number | null {
+    const hit = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>(".page");
+    if (!hit || !this.pagesEl.contains(hit)) return null;
+    return Number(hit.dataset.page) - 1;
+  }
+
+  /** Converts a point on screen to PDF points on page `index` (top-left origin). */
+  toPagePoint(index: number, clientX: number, clientY: number): { x: number; y: number } {
+    const rect = this.pages[index].el.getBoundingClientRect();
+    const size = this.doc!.pageSizes[index];
+    return {
+      x: ((clientX - rect.left) / rect.width) * size.width,
+      y: ((clientY - rect.top) / rect.height) * size.height,
+    };
+  }
+
+  /**
+   * Switches between reading and drawing. While drawing, one finger (or the
+   * mouse) draws instead of scrolling; two fingers still scroll and zoom.
+   */
+  setDrawingMode(mode: "pen" | "eraser" | null): void {
+    this.element.classList.toggle("drawing", mode !== null);
+    this.element.classList.toggle("erasing", mode === "eraser");
+  }
+
   /** Shows a newly opened document, replacing any previous one. */
   show(doc: PdfDocument): void {
     this.clear();

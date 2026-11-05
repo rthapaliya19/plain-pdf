@@ -1,14 +1,18 @@
 /**
- * A tiny typed event hub. Parts of the app (toolbar, viewer, and later the
- * pen and signature tools) talk to each other through these events instead
- * of reaching into each other directly, so new features can be added
- * without rewiring existing ones.
+ * A tiny typed event hub. Parts of the app (toolbar, viewer, tools) talk to
+ * each other through these events instead of reaching into each other
+ * directly, so new features can be added without rewiring existing ones.
  */
 export type AppEvents = {
   "document:opened": { name: string; pageCount: number };
   "document:closed": Record<string, never>;
   "page:changed": { page: number; pageCount: number };
   "zoom:changed": { zoom: number; fitWidth: boolean };
+  /** Drawings or other additions changed on these pages (0-based). */
+  "additions:changed": { pages: number[] };
+  "history:changed": { canUndo: boolean; canRedo: boolean };
+  /** The active tool changed. null = just viewing. */
+  "tool:changed": { id: string | null };
 };
 
 type Handler<T> = (payload: T) => void;
