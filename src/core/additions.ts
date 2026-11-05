@@ -51,6 +51,8 @@ export interface SignatureInk {
 export interface PlacedSignature extends Base {
   kind: "signature";
   role: "signature" | "initials";
+  /** Clockwise turn of the content in its box (when its page was rotated). */
+  turn?: number;
   x: number;
   y: number;
   width: number;
@@ -61,6 +63,8 @@ export interface PlacedSignature extends Base {
 /** Typed text. Lines are separated by "\n". (x, y) is the top-left corner. */
 export interface TextBox extends Base {
   kind: "text";
+  /** Clockwise turn of the text in its box (when its page was rotated). */
+  turn?: number;
   x: number;
   y: number;
   /** Size of the text block, in points (worked out when typing finishes). */
@@ -78,6 +82,25 @@ export const TEXT_LINE_HEIGHT = 1.2;
 export const TEXT_BASELINE = 0.9465;
 
 export type Addition = Stroke | TextHighlight | PlacedSignature | TextBox;
+
+/** The transform [a, b, c, d, e, f] that places a box's content, turned clockwise by `turn`. */
+export function boxMatrix(x: number, y: number, w: number, h: number, turn = 0): [number, number, number, number, number, number] {
+  switch (((turn % 360) + 360) % 360) {
+    case 90:
+      return [0, 1, -1, 0, x + w, y];
+    case 180:
+      return [-1, 0, 0, -1, x + w, y + h];
+    case 270:
+      return [0, -1, 1, 0, x, y + h];
+    default:
+      return [1, 0, 0, 1, x, y];
+  }
+}
+
+/** Size of a box's content before turning: width and height swap for quarter turns. */
+export function contentSize(w: number, h: number, turn = 0): { width: number; height: number } {
+  return ((turn % 180) + 180) % 180 === 90 ? { width: h, height: w } : { width: w, height: h };
+}
 
 let nextOrder = 1;
 let nextId = 1;

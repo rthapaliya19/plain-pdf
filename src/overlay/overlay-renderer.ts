@@ -11,6 +11,8 @@
 import {
   TEXT_BASELINE,
   TEXT_LINE_HEIGHT,
+  boxMatrix,
+  contentSize,
   type Additions,
   type PlacedSignature,
   type Stroke,
@@ -105,7 +107,7 @@ export class OverlayRenderer {
   preview(item: Movable): void {
     const layers = this.layers.get(item.page);
     if (!layers) return;
-    const transform = item.kind === "signature" ? signatureTransform(item) : `translate(${item.x} ${item.y})`;
+    const transform = item.kind === "signature" ? signatureTransform(item) : textTransform(item);
     layers.ink.querySelector(`g[data-id="${item.id}"]`)?.setAttribute("transform", transform);
     const box = layers.boxes.querySelector<HTMLElement>(`.sig-box[data-id="${item.id}"]`);
     if (box) placeBox(box, item, this.viewer.pageSize(item.page));
@@ -215,7 +217,12 @@ function highlightGroup(item: TextHighlight): SVGGElement {
 }
 
 function signatureTransform(sig: PlacedSignature): string {
-  return `translate(${sig.x} ${sig.y}) scale(${sig.width / sig.ink.width} ${sig.height / sig.ink.height})`;
+  const c = contentSize(sig.width, sig.height, sig.turn);
+  return `matrix(${boxMatrix(sig.x, sig.y, sig.width, sig.height, sig.turn).join(" ")}) scale(${c.width / sig.ink.width} ${c.height / sig.ink.height})`;
+}
+
+function textTransform(t: TextBox): string {
+  return `matrix(${boxMatrix(t.x, t.y, t.width, t.height, t.turn).join(" ")})`;
 }
 
 function signatureGroup(sig: PlacedSignature): SVGGElement {
@@ -240,7 +247,7 @@ function textGroup(item: TextBox): SVGGElement {
   const g = document.createElementNS(SVG_NS, "g");
   g.dataset.id = item.id;
   g.dataset.kind = item.kind;
-  g.setAttribute("transform", `translate(${item.x} ${item.y})`);
+  g.setAttribute("transform", textTransform(item));
   const text = document.createElementNS(SVG_NS, "text");
   text.setAttribute("class", "added-text");
   text.setAttribute("font-size", String(item.size));

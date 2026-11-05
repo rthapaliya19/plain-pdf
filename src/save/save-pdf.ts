@@ -44,6 +44,8 @@ import {
 import {
   TEXT_BASELINE,
   TEXT_LINE_HEIGHT,
+  boxMatrix,
+  contentSize,
   type Addition,
   type PlacedSignature,
   type Stroke,
@@ -158,12 +160,18 @@ function drawAddition(item: Exclude<Addition, TextBox>): PDFOperator[] {
  * (PDF measures from the bottom), so the text matrix flips each line back.
  */
 function drawText(t: TextBox, font: PDFFont, fontKey: PDFName): PDFOperator[] {
-  const ops: PDFOperator[] = [pushGraphicsState(), setFillingRgbColor(...rgb(t.color)), beginText(), setFontAndSize(fontKey, t.size)];
+  const ops: PDFOperator[] = [
+    pushGraphicsState(),
+    concatTransformationMatrix(...boxMatrix(t.x, t.y, t.width, t.height, t.turn)),
+    setFillingRgbColor(...rgb(t.color)),
+    beginText(),
+    setFontAndSize(fontKey, t.size),
+  ];
   t.text.split("\n").forEach((line, i) => {
     const text = encodable(line, font);
     if (!text) return;
-    const baseline = t.y + (TEXT_BASELINE + i * TEXT_LINE_HEIGHT) * t.size;
-    ops.push(setTextMatrix(1, 0, 0, -1, t.x, baseline), showText(font.encodeText(text)));
+    const baseline = (TEXT_BASELINE + i * TEXT_LINE_HEIGHT) * t.size;
+    ops.push(setTextMatrix(1, 0, 0, -1, 0, baseline), showText(font.encodeText(text)));
   });
   ops.push(endText(), popGraphicsState());
   return ops;
@@ -207,11 +215,13 @@ function drawHighlight(h: TextHighlight): PDFOperator[] {
 }
 
 function drawSignature(sig: PlacedSignature): PDFOperator[] {
-  const sx = sig.width / sig.ink.width;
-  const sy = sig.height / sig.ink.height;
+  const c = contentSize(sig.width, sig.height, sig.turn);
+  const sx = c.width / sig.ink.width;
+  const sy = c.height / sig.ink.height;
   const ops: PDFOperator[] = [
     pushGraphicsState(),
-    concatTransformationMatrix(sx, 0, 0, sy, sig.x, sig.y),
+    concatTransformationMatrix(...boxMatrix(sig.x, sig.y, sig.width, sig.height, sig.turn)),
+    concatTransformationMatrix(sx, 0, 0, sy, 0, 0),
     setStrokingRgbColor(...rgb(sig.ink.color)),
     setLineWidth(sig.ink.lineWidth),
     setLineCap(LineCapStyle.Round),

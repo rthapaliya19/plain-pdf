@@ -7,7 +7,7 @@
  * - Size and colour apply to the text being typed and to new text.
  * Every finished change can be undone.
  */
-import { TEXT_LINE_HEIGHT, newAdditionMeta, type Additions, type TextBox } from "../../core/additions";
+import { TEXT_LINE_HEIGHT, contentSize, newAdditionMeta, type Additions, type TextBox } from "../../core/additions";
 import type { History } from "../../core/history";
 import type { Tool } from "../../core/tools";
 import type { OverlayRenderer } from "../../overlay/overlay-renderer";
@@ -254,7 +254,9 @@ export class TextTool implements Tool {
         this.additions.remove(removed);
         this.history.record({ undo: () => this.additions.add(removed), redo: () => this.additions.remove(removed) });
       } else if (text !== ed.existing.text || ed.size !== ed.existing.size || ed.color !== ed.existing.color) {
-        this.update(ed.existing, { ...ed.existing, text, size: ed.size, color: ed.color, width, height });
+        // A turned text box keeps its turn; its box swaps width and height.
+        const box = contentSize(width, height, ed.existing.turn);
+        this.update(ed.existing, { ...ed.existing, text, size: ed.size, color: ed.color, width: box.width, height: box.height });
       }
       return;
     }

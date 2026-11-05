@@ -215,8 +215,9 @@ export class SignatureController {
       s.x = clamp(p.x - d.offsetX, 0, size.width - s.width);
       s.y = clamp(p.y - d.offsetY, 0, size.height - s.height);
     } else if (s.kind === "signature") {
-      // Keep the shape: width and height grow together.
-      const aspect = s.ink.height / s.ink.width;
+      // Keep the shape: width and height grow together (swapped if the signature was turned).
+      const turned = ((s.turn ?? 0) / 90) % 2 === 1;
+      const aspect = turned ? s.ink.width / s.ink.height : s.ink.height / s.ink.width;
       const maxWidth = Math.min(size.width - s.x, (size.height - s.y) / aspect);
       s.width = clamp(p.x - s.x, Math.min(MIN_WIDTH, maxWidth), maxWidth);
       s.height = s.width * aspect;
