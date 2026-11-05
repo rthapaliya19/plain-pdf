@@ -74,3 +74,35 @@ Each phase ends with a check-in: the owner tests and approves before the next ph
 - Initials added, in the same Sign panel as the signature (one Sign button keeps the toolbar uncluttered).
 - Highlighter thickness removed; a Done button exits drawing.
 - Saving writes additions into the page content (locked in), keeps the file's metadata as it was, and never changes the original. Encrypted PDFs can't be saved with changes yet (added to the later list).
+
+## Next features (agreed 2026-11-05)
+
+Built in three rounds, each ending with a check-in. Then Phase 5 (installable apps).
+
+| Round | Features |
+|---|---|
+| A | Add text anywhere; fill form fields; links inside PDFs |
+| B | Select and copy text; search text; print |
+| C | Organize pages (grid of page previews, shown only from the Organize button): rotate, delete, reorder; merge (add pages from other PDFs, several at once, at the end); split (save selected pages as a new PDF) |
+
+Decisions:
+- Add text: English only (standard Helvetica font in saved files; Arimo, its metric twin, on screen). Tap a page with the Text tool to type; 3 sizes; black, blue, red; saved as real text.
+- Forms: filled answers are locked into the page when saving (like everything else). Old Adobe XFA forms can't be filled; the app says so.
+- Links: links inside the document jump to the page; web links ask "Open this link in your browser?" first.
+- Less frequent actions (Print, Organize pages, Add pages, Save selected pages) go in a "More" menu.
+- Split = save selected pages as a new PDF (no multi-file split).
+
+## Progress (for picking up where work stopped)
+
+- [x] Phases 0-4: viewer, draw, highlighter, signature and initials, save a copy
+- [ ] Round A: add text
+- [ ] Round A: fill forms and links
+- [ ] Round A: check-in
+- [ ] Round B: select and copy text
+- [ ] Round B: search
+- [ ] Round B: print
+- [ ] Round B: check-in
+- [ ] Round C: organize pages (rotate, delete, reorder)
+- [ ] Round C: merge and split
+- [ ] Round C: check-in
+- [ ] Phase 5: installable apps
