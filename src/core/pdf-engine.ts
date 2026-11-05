@@ -8,6 +8,7 @@ import {
   AnnotationMode,
   GlobalWorkerOptions,
   PasswordResponses,
+  TextLayer,
   Util,
   getDocument,
   type PDFDocumentLoadingTask,
@@ -81,6 +82,8 @@ export interface PdfDocument {
    * --total-scale-factor, so zooming needs no redraw.
    */
   renderInteractive(index: number, div: HTMLDivElement, links: LinkHandler): Promise<void>;
+  /** Adds invisible, selectable text over page `index` (for selecting and copying). */
+  renderTextLayer(index: number, div: HTMLDivElement): Promise<void>;
   /** True once any form field has been filled in or changed. */
   readonly formsModified: boolean;
   onFormsChanged(callback: () => void): void;
@@ -250,6 +253,19 @@ export async function openPdf(bytes: Uint8Array, askPassword: PasswordPrompt): P
         annotationCanvasMap: fieldCanvases[index],
       } as Parameters<AnnotationLayer["render"]>[0]);
       formLayers[index] = layer;
+    },
+    async renderTextLayer(index, div) {
+      const page = pages[index];
+      const layer = new TextLayer({
+        textContentSource: page.streamTextContent({ includeMarkedContent: true, disableNormalization: true }),
+        container: div,
+        viewport: page.getViewport({ scale: 1 }),
+      });
+      await layer.render();
+      // Helps drag-selection behave at the end of the text (as in Firefox's viewer).
+      const end = document.createElement("div");
+      end.className = "endOfContent";
+      div.append(end);
     },
     get formsModified() {
       return formsModified;

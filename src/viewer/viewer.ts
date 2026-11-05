@@ -22,6 +22,8 @@ const RENDER_CONCURRENCY = 2;
 interface PageView {
   index: number;
   el: HTMLDivElement;
+  /** Invisible, selectable text. */
+  text: HTMLDivElement;
   /** Fillable form fields and clickable links. */
   interactive: HTMLDivElement;
   interactiveDone: boolean;
@@ -56,6 +58,13 @@ export class Viewer {
     this.element.append(this.pagesEl);
 
     this.element.addEventListener("scroll", () => this.onScroll(), { passive: true });
+    // While drag-selecting text, let the selection extend smoothly past the last line.
+    this.element.addEventListener("pointerdown", (e) => {
+      (e.target as HTMLElement).closest(".textLayer")?.classList.add("selecting");
+    });
+    document.addEventListener("pointerup", () => {
+      this.pagesEl.querySelectorAll(".textLayer.selecting").forEach((t) => t.classList.remove("selecting"));
+    });
     new ResizeObserver(() => {
       if (!this.doc) return;
       if (this.fit) this.applyZoom(this.fitZoom(), null, true);
@@ -167,13 +176,15 @@ export class Viewer {
       el.className = "page";
       el.dataset.page = String(index + 1);
       el.setAttribute("aria-label", `Page ${index + 1}`);
+      const text = document.createElement("div");
+      text.className = "textLayer";
       const interactive = document.createElement("div");
       interactive.className = "annotationLayer";
       const overlay = document.createElement("div");
       overlay.className = "page-overlay";
-      el.append(interactive, overlay);
+      el.append(text, interactive, overlay);
       fragment.append(el);
-      return { index, el, interactive, interactiveDone: false, overlay, canvas: null, renderedAt: 0, job: null, near: false };
+      return { index, el, text, interactive, interactiveDone: false, overlay, canvas: null, renderedAt: 0, job: null, near: false };
     });
     this.pagesEl.append(fragment);
     this.layout();
@@ -385,6 +396,9 @@ export class Viewer {
           page.interactiveDone = true;
           doc.renderInteractive(page.index, page.interactive, this.links).catch((error: unknown) => {
             console.error(`Couldn't set up form fields on page ${page.index + 1}`, error);
+          });
+          doc.renderTextLayer(page.index, page.text).catch((error: unknown) => {
+            console.error(`Couldn't set up selectable text on page ${page.index + 1}`, error);
           });
         }
       })

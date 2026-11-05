@@ -286,7 +286,11 @@ input:focus-visible {
   pointer-events: none;
 }
 
-/* While drawing or adding text, form fields and links don't react. */
+/* While drawing or adding text, selectable text, form fields and links don't react. */
+.viewer.drawing .textLayer,
+.viewer.drawing .textLayer *,
+.viewer.texting .textLayer,
+.viewer.texting .textLayer *,
 .viewer.drawing .annotationLayer,
 .viewer.drawing .annotationLayer *,
 .viewer.texting .annotationLayer,
