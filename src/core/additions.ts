@@ -58,7 +58,26 @@ export interface PlacedSignature extends Base {
   ink: SignatureInk;
 }
 
-export type Addition = Stroke | TextHighlight | PlacedSignature;
+/** Typed text. Lines are separated by "\n". (x, y) is the top-left corner. */
+export interface TextBox extends Base {
+  kind: "text";
+  x: number;
+  y: number;
+  /** Size of the text block, in points (worked out when typing finishes). */
+  width: number;
+  height: number;
+  text: string;
+  /** Font size in points. */
+  size: number;
+  color: string;
+}
+
+/** Text layout shared by the screen and saved files (Arimo on screen, Helvetica in the PDF: same widths). */
+export const TEXT_LINE_HEIGHT = 1.2;
+/** Distance from the top of a line to its baseline, as a fraction of the font size. */
+export const TEXT_BASELINE = 0.9465;
+
+export type Addition = Stroke | TextHighlight | PlacedSignature | TextBox;
 
 let nextOrder = 1;
 let nextId = 1;

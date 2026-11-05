@@ -15,9 +15,16 @@ import {
   LineJoinStyle,
   PDFDocument,
   PDFName,
+  StandardFonts,
+  type PDFFont,
   type PDFOperator,
   type PDFPage,
   appendBezierCurve,
+  beginText,
+  endText,
+  setFontAndSize,
+  setTextMatrix,
+  showText,
   concatTransformationMatrix,
   fill,
   lineTo,
@@ -33,7 +40,15 @@ import {
   setStrokingRgbColor,
   stroke,
 } from "pdf-lib";
-import type { Addition, PlacedSignature, Stroke, TextHighlight } from "../core/additions";
+import {
+  TEXT_BASELINE,
+  TEXT_LINE_HEIGHT,
+  type Addition,
+  type PlacedSignature,
+  type Stroke,
+  type TextBox,
+  type TextHighlight,
+} from "../core/additions";
 import type { Matrix } from "../core/pdf-engine";
 
 export class EncryptedPdfError extends Error {
@@ -59,6 +74,8 @@ export async function saveWithAdditions(
   }
 
   const pages = doc.getPages();
+  // Typed text uses Helvetica, a font every PDF reader has built in.
+  const helvetica = additions.some((a) => a.kind === "text") ? await doc.embedFont(StandardFonts.Helvetica) : null;
   const byPage = new Map<number, Addition[]>();
   for (const item of additions) {
     if (!byPage.has(item.page)) byPage.set(item.page, []);
@@ -76,10 +93,14 @@ export async function saveWithAdditions(
     const ops: PDFOperator[] = [pushGraphicsState(), concatTransformationMatrix(...pageToPdf[index])];
     if (highlights.length > 0) {
       ops.push(pushGraphicsState(), setGraphicsState(multiplyBlend(doc, page)));
-      for (const item of highlights) ops.push(...drawAddition(item));
+      for (const item of highlights) ops.push(...drawAddition(item as Exclude<Addition, TextBox>));
       ops.push(popGraphicsState());
     }
-    for (const item of ink) ops.push(...drawAddition(item));
+    const fontKey = helvetica && ink.some((a) => a.kind === "text") ? page.node.newFontDictionary("PlainPdfHelv", helvetica.ref) : null;
+    for (const item of ink) {
+      if (item.kind === "text") ops.push(...drawText(item, helvetica!, fontKey!));
+      else ops.push(...drawAddition(item));
+    }
     ops.push(popGraphicsState());
     page.pushOperators(...ops);
   }
@@ -93,10 +114,40 @@ function multiplyBlend(doc: PDFDocument, page: PDFPage): PDFName {
   return page.node.newExtGState("PlainPdfHighlight", doc.context.register(state));
 }
 
-function drawAddition(item: Addition): PDFOperator[] {
+function drawAddition(item: Exclude<Addition, TextBox>): PDFOperator[] {
   if (item.kind === "stroke") return drawStroke(item);
   if (item.kind === "highlight") return drawHighlight(item);
   return drawSignature(item);
+}
+
+/**
+ * Real, selectable text. The page transform turns everything upside down
+ * (PDF measures from the bottom), so the text matrix flips each line back.
+ */
+function drawText(t: TextBox, font: PDFFont, fontKey: PDFName): PDFOperator[] {
+  const ops: PDFOperator[] = [pushGraphicsState(), setFillingRgbColor(...rgb(t.color)), beginText(), setFontAndSize(fontKey, t.size)];
+  t.text.split("\n").forEach((line, i) => {
+    const text = encodable(line, font);
+    if (!text) return;
+    const baseline = t.y + (TEXT_BASELINE + i * TEXT_LINE_HEIGHT) * t.size;
+    ops.push(setTextMatrix(1, 0, 0, -1, t.x, baseline), showText(font.encodeText(text)));
+  });
+  ops.push(endText(), popGraphicsState());
+  return ops;
+}
+
+/** Replaces any character the built-in font can't show (rare in English) with "?". */
+function encodable(text: string, font: PDFFont): string {
+  let out = "";
+  for (const ch of text) {
+    try {
+      font.encodeText(ch);
+      out += ch;
+    } catch {
+      out += "?";
+    }
+  }
+  return out;
 }
 
 function drawStroke(s: Stroke): PDFOperator[] {

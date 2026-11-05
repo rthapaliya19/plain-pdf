@@ -125,6 +125,16 @@ export class Viewer {
     this.element.classList.toggle("erasing", mode === "eraser");
   }
 
+  /** While the Text tool is on, tapping a page places or edits text. */
+  setTextMode(on: boolean): void {
+    this.element.classList.toggle("texting", on);
+  }
+
+  /** Keeps the CSS variable --pt (screen pixels per PDF point) up to date, for text boxes. */
+  private updatePointSize(): void {
+    this.element.style.setProperty("--pt", `${this.cssPixelsPerPoint}px`);
+  }
+
   /** Shows a newly opened document, replacing any previous one. */
   show(doc: PdfDocument): void {
     this.clear();
@@ -157,6 +167,7 @@ export class Viewer {
     this.element.scrollTop = 0;
     this.element.scrollLeft = 0;
     this.hub.emit("page:changed", { page: 1, pageCount: this.pages.length });
+    this.updatePointSize();
     this.hub.emit("zoom:changed", { zoom: this.zoom, fitWidth: this.fit });
     this.element.focus({ preventScroll: true });
   }
@@ -229,6 +240,7 @@ export class Viewer {
       this.element.scrollTop = page.el.offsetTop + fy * page.el.offsetHeight - ay;
       this.scheduleRender(150);
     }
+    this.updatePointSize();
     this.hub.emit("zoom:changed", { zoom: this.zoom, fitWidth: this.fit });
   }
 

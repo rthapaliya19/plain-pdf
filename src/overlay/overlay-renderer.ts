@@ -8,7 +8,15 @@
  * Signatures also get an invisible box on top that you can tap, drag and
  * resize.
  */
-import type { Additions, PlacedSignature, Stroke, TextHighlight } from "../core/additions";
+import {
+  TEXT_BASELINE,
+  TEXT_LINE_HEIGHT,
+  type Additions,
+  type PlacedSignature,
+  type Stroke,
+  type TextBox,
+  type TextHighlight,
+} from "../core/additions";
 import type { EventHub } from "../core/events";
 import type { Rect } from "../core/text-layout";
 import type { Viewer } from "../viewer/viewer";
@@ -20,11 +28,16 @@ interface Layers {
   highlight: SVGSVGElement;
   ink: SVGSVGElement;
   boxes: HTMLDivElement;
+  overlay: HTMLDivElement;
 }
+
+/** Additions you can tap, drag and remove: signatures, initials and text. */
+type Movable = PlacedSignature | TextBox;
 
 export class OverlayRenderer {
   private layers = new Map<number, Layers>();
   private selectedId: string | null = null;
+  private hiddenId: string | null = null;
 
   constructor(
     private readonly viewer: Viewer,
@@ -88,13 +101,24 @@ export class OverlayRenderer {
     }
   }
 
-  /** Moves or resizes a signature on screen while it is being dragged. */
-  preview(sig: PlacedSignature): void {
-    const layers = this.layers.get(sig.page);
+  /** Moves or resizes a signature or text on screen while it is being dragged. */
+  preview(item: Movable): void {
+    const layers = this.layers.get(item.page);
     if (!layers) return;
-    layers.ink.querySelector(`g[data-id="${sig.id}"]`)?.setAttribute("transform", signatureTransform(sig));
-    const box = layers.boxes.querySelector<HTMLElement>(`.sig-box[data-id="${sig.id}"]`);
-    if (box) placeBox(box, sig, this.viewer.pageSize(sig.page));
+    const transform = item.kind === "signature" ? signatureTransform(item) : `translate(${item.x} ${item.y})`;
+    layers.ink.querySelector(`g[data-id="${item.id}"]`)?.setAttribute("transform", transform);
+    const box = layers.boxes.querySelector<HTMLElement>(`.sig-box[data-id="${item.id}"]`);
+    if (box) placeBox(box, item, this.viewer.pageSize(item.page));
+  }
+
+  /** Hides one addition (while it is being edited in place). */
+  hide(id: string | null): void {
+    this.hiddenId = id;
+    for (const layers of this.layers.values()) {
+      for (const el of layers.overlay.querySelectorAll<HTMLElement | SVGElement>("[data-id]")) {
+        el.classList.toggle("being-edited", el.dataset.id === id);
+      }
+    }
   }
 
   // ---------- Drawing everything ----------
@@ -119,11 +143,16 @@ export class OverlayRenderer {
       } else if (item.kind === "highlight") {
         element = highlightGroup(item);
         layer = layers.highlight;
+      } else if (item.kind === "text") {
+        element = textGroup(item);
+        layer = layers.ink;
+        layers.boxes.append(itemBox(item, size, item.id === this.selectedId));
       } else {
         element = signatureGroup(item);
         layer = layers.ink;
-        layers.boxes.append(signatureBox(item, size, item.id === this.selectedId));
+        layers.boxes.append(itemBox(item, size, item.id === this.selectedId));
       }
+      if (item.id === this.hiddenId) element.classList.add("being-edited");
       // Keep any in-progress drawing on top.
       layer.insertBefore(element, layer.querySelector(":scope > .live"));
     }
@@ -147,7 +176,7 @@ export class OverlayRenderer {
     const boxes = document.createElement("div");
     boxes.className = "layer-boxes";
     overlay.append(boxes);
-    layers = { highlight, ink, boxes };
+    layers = { highlight, ink, boxes, overlay };
     this.layers.set(page, layers);
     return layers;
   }
@@ -207,32 +236,58 @@ function signatureGroup(sig: PlacedSignature): SVGGElement {
   return g;
 }
 
-function placeBox(box: HTMLElement, sig: PlacedSignature, page: { width: number; height: number }): void {
+function textGroup(item: TextBox): SVGGElement {
+  const g = document.createElementNS(SVG_NS, "g");
+  g.dataset.id = item.id;
+  g.dataset.kind = item.kind;
+  g.setAttribute("transform", `translate(${item.x} ${item.y})`);
+  const text = document.createElementNS(SVG_NS, "text");
+  text.setAttribute("class", "added-text");
+  text.setAttribute("font-size", String(item.size));
+  text.setAttribute("fill", item.color);
+  item.text.split("\n").forEach((line, i) => {
+    const span = document.createElementNS(SVG_NS, "tspan");
+    span.setAttribute("x", "0");
+    span.setAttribute("y", String((TEXT_BASELINE + i * TEXT_LINE_HEIGHT) * item.size));
+    span.textContent = line || " ";
+    text.append(span);
+  });
+  g.append(text);
+  return g;
+}
+
+function placeBox(box: HTMLElement, sig: Movable, page: { width: number; height: number }): void {
   box.style.left = `${(sig.x / page.width) * 100}%`;
   box.style.top = `${(sig.y / page.height) * 100}%`;
   box.style.width = `${(sig.width / page.width) * 100}%`;
   box.style.height = `${(sig.height / page.height) * 100}%`;
 }
 
-function signatureBox(sig: PlacedSignature, page: { width: number; height: number }, selected: boolean): HTMLDivElement {
+function itemBox(item: Movable, page: { width: number; height: number }, selected: boolean): HTMLDivElement {
   const box = document.createElement("div");
-  box.className = selected ? "sig-box selected" : "sig-box";
-  box.dataset.id = sig.id;
-  box.setAttribute("aria-label", `${sig.role === "initials" ? "Initials" : "Signature"}. Drag to move.`);
-  placeBox(box, sig, page);
+  box.className = `sig-box${item.kind === "text" ? " text-box" : ""}${selected ? " selected" : ""}`;
+  box.dataset.id = item.id;
+  const name = item.kind === "text" ? "Text" : item.role === "initials" ? "Initials" : "Signature";
+  box.setAttribute(
+    "aria-label",
+    item.kind === "text" ? "Text. Drag to move, double-click to edit." : `${name}. Drag to move.`,
+  );
+  placeBox(box, item, page);
 
   const remove = document.createElement("button");
   remove.type = "button";
   remove.className = "sig-delete";
-  remove.title = sig.role === "initials" ? "Remove initials" : "Remove signature";
+  remove.title = `Remove ${name.toLowerCase()}`;
   remove.setAttribute("aria-label", remove.title);
   remove.textContent = "×";
+  box.append(remove);
 
-  const handle = document.createElement("div");
-  handle.className = "sig-handle";
-  handle.title = "Drag to resize";
-  handle.setAttribute("aria-label", "Resize signature");
-
-  box.append(remove, handle);
+  if (item.kind === "signature") {
+    const handle = document.createElement("div");
+    handle.className = "sig-handle";
+    handle.title = "Drag to resize";
+    handle.setAttribute("aria-label", "Resize");
+    box.append(handle);
+  }
   return box;
 }
