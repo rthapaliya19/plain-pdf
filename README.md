@@ -15,10 +15,40 @@ A private, offline PDF app for Windows, Android and macOS, with no clutter.
 | 2 | Pen (black, blue, red), yellow highlighter that follows the text, eraser, undo/redo | Done |
 | 3 | Signature and initials: draw once, remembered on the device, place and resize | Done, waiting for your testing |
 | 4 | Save a copy with additions locked into the page | Done, waiting for your testing |
-| 5 | Installable apps for Windows, Android and macOS, set as the default PDF app | Next |
+| 5 | Installable apps for Windows, Android and macOS, set as the default PDF app | Done, waiting for your testing |
 | Later | Text editing (fixing typos, rewriting sentences) and new ideas | Planned |
 
 The full plan is in [docs/PLAN.md](docs/PLAN.md).
+
+## Installing the app
+
+Download the file for your device from the [Releases page](https://github.com/rthapaliya19/plain-pdf/releases/latest). These apps don't come from an app store, so each device asks you to confirm once.
+
+### Windows
+
+1. Download **Plain.PDF_…_x64-setup.exe** and open it.
+2. If Windows says **"Windows protected your PC"**, click **More info**, then **Run anyway**.
+3. Follow the installer (it installs just for you; no administrator needed).
+4. Make it your PDF app: open **Settings > Apps > Default apps**, search for **.pdf**, and choose **Plain PDF**. (Or right-click any PDF, **Open with > Choose another app**, pick **Plain PDF**, and click **Always**.)
+
+### Mac
+
+1. Download **Plain.PDF_…_universal.dmg** and open it. Drag **Plain PDF** into **Applications**.
+2. Open Plain PDF from Applications. The first time, macOS blocks it. Open **System Settings > Privacy & Security**, scroll down, click **Open Anyway** next to Plain PDF, and confirm with your password.
+3. If macOS instead says the app "is damaged", open **Terminal** and run `xattr -cr "/Applications/Plain PDF.app"`, then open it again.
+4. Make it your PDF app: right-click any PDF in Finder, choose **Get Info**, set **Open with** to **Plain PDF**, and click **Change All**.
+
+### Android
+
+1. On your phone, open the Releases page in Chrome and download **Plain.PDF_…_android.apk**.
+2. Tap the download. If asked, allow Chrome to **install unknown apps**, then tap **Install**. If Play Protect warns about an unknown app, choose **More details > Install anyway**.
+3. Make it your PDF app: open any PDF from the **Files** app, choose **Plain PDF**, and tap **Always**. From the Google Drive app, use **⋮ > Open with > Plain PDF**.
+
+Each device keeps its own saved signature and initials, so draw them once in the installed app.
+
+### Updating
+
+When there's a new version, download and install it the same way, over the old one. The app never checks for updates by itself, so it never connects to the internet.
 
 ## Using it
 
@@ -105,6 +135,12 @@ tests/
 ```
 
 Each page in the viewer has an overlay layer on top of the PDF drawing. The pen, highlighter and (later) signature tools draw into that layer, so they never change the original file. Additions are only written into a new copy when saving.
+
+### Installed apps (Tauri)
+
+The same web app runs inside small native apps built with [Tauri 2](https://tauri.app) (`src-tauri/`). The native part only opens the window and receives PDFs the system asks it to open; `src/platform/native.ts` uses the system's Open and Save windows. Android extras are in `android/MainActivity.kt` and `scripts/android-setup.mjs`.
+
+Pushing to the `release` branch runs `.github/workflows/apps.yml`, which builds the Windows installer, the Mac app (Apple chips and Intel) and the Android app, and publishes them as a release named after the version in `src-tauri/tauri.conf.json`. To build locally: `npx tauri build` (needs Rust).
 
 ### Privacy lock
 

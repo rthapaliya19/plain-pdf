@@ -101,8 +101,10 @@ Decisions:
 - [x] Round B: select and copy text
 - [x] Round B: search
 - [x] Round B: print
-- [ ] Round B: check-in (owner will test B and C together)
+- [x] Round B: check-in
 - [x] Round C: organize pages (rotate, delete, reorder)
 - [x] Round C: merge and split
-- [ ] Round C: check-in (owner testing B and C together)
-- [ ] Phase 5: installable apps
+- [x] Round C: check-in
+- [x] Phase 5: Windows and Mac apps built (v1.0.0 release)
+- [ ] Phase 5: Android app built
+- [ ] Phase 5: owner installs on Windows, Pixel and Mac and sets as default
