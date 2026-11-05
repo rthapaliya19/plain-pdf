@@ -112,6 +112,23 @@ export class Viewer {
     return this.doc!.pageSizes[index];
   }
 
+  /** The element of page `index` (for temporary marks such as search results). */
+  pageElement(index: number): HTMLDivElement | null {
+    return this.pages[index]?.el ?? null;
+  }
+
+  /** Scrolls so that point (x, y) of page `index` (points) is comfortably in view. */
+  reveal(index: number, x: number, y: number): void {
+    const page = this.pages[index];
+    if (!page || !this.doc) return;
+    const scale = page.el.offsetHeight / this.doc.pageSizes[index].height;
+    const el = this.element;
+    el.scrollTop = page.el.offsetTop + y * scale - el.clientHeight / 3;
+    const left = page.el.offsetLeft + x * scale;
+    if (left < el.scrollLeft || left > el.scrollLeft + el.clientWidth - 40) el.scrollLeft = left - el.clientWidth / 3;
+    this.updateCurrentPage();
+  }
+
   /** The layer on top of page `index` where additions are shown. */
   overlay(index: number): HTMLDivElement | null {
     return this.pages[index]?.overlay ?? null;

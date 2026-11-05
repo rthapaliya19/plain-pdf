@@ -35,7 +35,7 @@ const DESCENT = 0.24;
 let measureContext: CanvasRenderingContext2D | null = null;
 
 /** Estimated left/right edge of each character, scaled to the run's real width. */
-function characterEdges(text: string, width: number): number[] {
+export function characterEdges(text: string, width: number): number[] {
   measureContext ??= document.createElement("canvas").getContext("2d");
   const chars = [...text];
   let widths: number[];

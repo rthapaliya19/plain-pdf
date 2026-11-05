@@ -5,6 +5,7 @@
  */
 import type { EventHub } from "../core/events";
 import { icons } from "./icons";
+import { MoreMenu } from "./menu";
 
 export interface ToolbarActions {
   open(): void;
@@ -12,6 +13,7 @@ export interface ToolbarActions {
   toggleText(): void;
   sign(): void;
   save(): void;
+  search(): void;
   undo(): void;
   redo(): void;
   zoomIn(): void;
@@ -37,6 +39,8 @@ export class Toolbar {
   private readonly pageTotal: HTMLSpanElement;
   private readonly zoomLabel: HTMLButtonElement;
   private readonly saveButton: HTMLButtonElement;
+  /** Less frequent actions (Print, and later Organize pages and Add pages). */
+  readonly moreMenu = new MoreMenu();
   private page = 1;
 
   constructor(hub: EventHub, actions: ToolbarActions) {
@@ -115,7 +119,10 @@ export class Toolbar {
     this.docControls = document.createElement("div");
     this.docControls.className = "doc-controls";
     this.docControls.hidden = true;
-    this.docControls.append(pageGroup, zoomGroup);
+    const search = iconButton(icons.search, "", `Search (${MOD}+F)`);
+    search.setAttribute("aria-label", "Search");
+    search.addEventListener("click", () => actions.search());
+    this.docControls.append(search, pageGroup, zoomGroup);
 
     this.saveButton = iconButton(icons.save, "Save", `Save a copy with your changes (${MOD}+S)`);
     this.saveButton.classList.add("save-button");
@@ -123,7 +130,8 @@ export class Toolbar {
     this.saveButton.disabled = true;
     this.saveButton.addEventListener("click", () => actions.save());
 
-    this.element.append(open, this.toolGroup, this.fileName, this.docControls, this.saveButton);
+    this.moreMenu.element.hidden = true;
+    this.element.append(open, this.toolGroup, this.fileName, this.docControls, this.moreMenu.element, this.saveButton);
 
     hub.on("document:opened", ({ name, pageCount }) => {
       this.fileName.textContent = name;
@@ -133,6 +141,7 @@ export class Toolbar {
       this.docControls.hidden = false;
       this.toolGroup.hidden = false;
       this.saveButton.hidden = false;
+      this.moreMenu.element.hidden = false;
       document.body.classList.add("has-document");
     });
     hub.on("document:closed", () => {
@@ -140,6 +149,7 @@ export class Toolbar {
       this.docControls.hidden = true;
       this.toolGroup.hidden = true;
       this.saveButton.hidden = true;
+      this.moreMenu.element.hidden = true;
       document.body.classList.remove("has-document");
     });
     hub.on("page:changed", ({ page }) => {

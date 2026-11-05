@@ -12,6 +12,8 @@ import { OverlayRenderer } from "./overlay/overlay-renderer";
 import { DrawTool } from "./tools/draw/draw-tool";
 import { SignatureController } from "./tools/sign/signature-controller";
 import { TextTool } from "./tools/text/text-tool";
+import { printDocument } from "./tools/print/print";
+import { Search } from "./tools/search/search";
 import { chooseSaveTarget, editedName } from "./save/save-file";
 import { askConfirm, askPassword, showMessage } from "./ui/dialog";
 import { showToast } from "./ui/toast";
@@ -34,6 +36,7 @@ export class App {
   private readonly history = new History(this.hub);
   private readonly tools = new ToolManager(this.hub);
   private readonly toolbar: Toolbar;
+  private readonly search: Search;
   private readonly startScreen: HTMLElement;
   private readonly busy: HTMLElement;
   private readonly dropHint: HTMLElement;
@@ -64,6 +67,7 @@ export class App {
       toggleDraw: () => this.tools.toggle("draw"),
       toggleText: () => this.tools.toggle("text"),
       save: () => void this.save(),
+      search: () => this.search.open(),
       sign: () => {
         this.tools.deactivate();
         void signatures.start();
@@ -100,7 +104,11 @@ export class App {
 
     const main = document.createElement("main");
     main.className = "main";
+    this.search = new Search(this.viewer, this.hub, () => this.current?.doc ?? null);
+    this.toolbar.moreMenu.add(icons.print, "Print", isMac() ? "⌘P" : "Ctrl+P", () => void this.print());
+
     main.append(
+      this.search.element,
       this.viewer.element,
       drawTool.options.element,
       textTool.options.element,
@@ -231,11 +239,7 @@ export class App {
     this.busy.querySelector("p")!.textContent = "Saving a copy…";
     this.busy.hidden = false;
     try {
-      // The saving code (pdf-lib) is only loaded the first time you save.
-      const { saveWithAdditions } = await import("./save/save-pdf");
-      const filledForms = file.doc.formsModified;
-      const base = filledForms ? await file.doc.bytesWithFormValues() : file.bytes;
-      const bytes = await saveWithAdditions(base, this.additions.all(), file.doc.pageToPdf, { lockForms: filledForms });
+      const bytes = await this.buildCopy(file);
       await target.write(bytes);
       if (this.current === file) this.dirty = false;
       showToast(
@@ -253,6 +257,54 @@ export class App {
     } finally {
       this.saving = false;
       this.busy.hidden = true;
+    }
+  }
+
+  /** A copy of the open file with everything added (and form answers) locked in. */
+  private async buildCopy(file: OpenFile): Promise<Uint8Array> {
+    // The saving code (pdf-lib) is only loaded the first time it's needed.
+    const { saveWithAdditions } = await import("./save/save-pdf");
+    const filledForms = file.doc.formsModified;
+    const base = filledForms ? await file.doc.bytesWithFormValues() : file.bytes;
+    return saveWithAdditions(base, this.additions.all(), file.doc.pageToPdf, { lockForms: filledForms });
+  }
+
+  /** Prints the document as it would be saved: with your drawings, text and signatures. */
+  async print(): Promise<void> {
+    const file = this.current;
+    if (!file || this.saving) return;
+    this.tools.deactivate();
+    let source = file.doc;
+    let temporary: PdfDocument | null = null;
+    this.saving = true;
+    this.busy.hidden = false;
+    const progress = (text: string) => (this.busy.querySelector("p")!.textContent = text);
+    progress("Preparing to print…");
+    try {
+      if (this.additions.size > 0) {
+        if (file.doc.encrypted) {
+          this.busy.hidden = true;
+          const go = await askConfirm(
+            "Print without your changes?",
+            "This PDF is encrypted, so Plain PDF can't add your changes to the printout yet.",
+            "Print without changes",
+            "Cancel",
+          );
+          if (!go) return;
+          this.busy.hidden = false;
+        } else {
+          temporary = await openPdf(await this.buildCopy(file), askPassword);
+          source = temporary;
+        }
+      }
+      await printDocument(source, (page, total) => progress(`Preparing page ${page} of ${total} for printing…`));
+    } catch (error) {
+      console.error(error);
+      await showMessage("Couldn't print", "Something went wrong while preparing the pages for printing.");
+    } finally {
+      this.saving = false;
+      this.busy.hidden = true;
+      await temporary?.close();
     }
   }
 
@@ -309,6 +361,12 @@ export class App {
       } else if (key === "s") {
         event.preventDefault();
         void this.save();
+      } else if (key === "f" && this.current) {
+        event.preventDefault();
+        this.search.open();
+      } else if (key === "p" && this.current) {
+        event.preventDefault();
+        void this.print();
       } else if (key === "o") {
         event.preventDefault();
         this.chooseFile();
@@ -344,6 +402,10 @@ export class App {
       if (file) void this.openFile(file);
     });
   }
+}
+
+function isMac(): boolean {
+  return /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 }
 
 function overlay(className: string, text: string): HTMLElement {

@@ -82,6 +82,8 @@ export interface PdfDocument {
    * --total-scale-factor, so zooming needs no redraw.
    */
   renderInteractive(index: number, div: HTMLDivElement, links: LinkHandler): Promise<void>;
+  /** Draws page `index` for printing, including form answers, at `pixelsPerPoint`. */
+  renderForPrint(index: number, pixelsPerPoint: number): Promise<HTMLCanvasElement>;
   /** Adds invisible, selectable text over page `index` (for selecting and copying). */
   renderTextLayer(index: number, div: HTMLDivElement): Promise<void>;
   /** True once any form field has been filled in or changed. */
@@ -253,6 +255,22 @@ export async function openPdf(bytes: Uint8Array, askPassword: PasswordPrompt): P
         annotationCanvasMap: fieldCanvases[index],
       } as Parameters<AnnotationLayer["render"]>[0]);
       formLayers[index] = layer;
+    },
+    async renderForPrint(index, pixelsPerPoint) {
+      const page = pages[index];
+      const viewport = page.getViewport({ scale: pixelsPerPoint });
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
+      await page.render({
+        canvas,
+        viewport,
+        intent: "print",
+        background: "#ffffff",
+        annotationMode: AnnotationMode.ENABLE_STORAGE,
+        printAnnotationStorage: doc.annotationStorage.print,
+      }).promise;
+      return canvas;
     },
     async renderTextLayer(index, div) {
       const page = pages[index];
