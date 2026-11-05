@@ -17,7 +17,13 @@ import { TextTool } from "./tools/text/text-tool";
 import { printDocument } from "./tools/print/print";
 import { Search } from "./tools/search/search";
 import { OrganizeScreen } from "./tools/organize/organize-screen";
-import { isNativeApp, openManyWithSystemDialog, openWithSystemDialog, watchSystemOpenRequests } from "./platform/native";
+import {
+  isAndroidApp,
+  isNativeApp,
+  openManyWithSystemDialog,
+  openWithSystemDialog,
+  watchSystemOpenRequests,
+} from "./platform/native";
 import { chooseSaveTarget, editedName } from "./save/save-file";
 import { askConfirm, askPassword, showMessage } from "./ui/dialog";
 import { showToast } from "./ui/toast";
@@ -139,7 +145,8 @@ export class App {
       if (isNativeApp) void openManyWithSystemDialog().then((files) => this.addPagesFromFiles(files));
       else this.organize.chooseFilesToAdd();
     });
-    this.toolbar.moreMenu.add(icons.print, "Print", isMac() ? "⌘P" : "Ctrl+P", () => void this.print());
+    // Android's app view can't print yet; everywhere else, Print is in the More menu.
+    if (!isAndroidApp) this.toolbar.moreMenu.add(icons.print, "Print", isMac() ? "⌘P" : "Ctrl+P", () => void this.print());
 
     main.append(
       this.search.element,

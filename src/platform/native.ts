@@ -7,7 +7,20 @@
 
 export const isNativeApp = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
-const fileName = (path: string) => decodeURIComponent(path.split(/[\\/]/).pop() || "document.pdf");
+/** "C:\\Docs\\a.pdf", "/Users/me/a.pdf" or an Android "content://..." address -> "a.pdf". */
+function fileName(path: string): string {
+  let decoded = path;
+  try {
+    decoded = decodeURIComponent(path);
+  } catch {
+    // Not encoded.
+  }
+  const name = decoded.split(/[\\/:]/).pop() || "document.pdf";
+  return name.toLowerCase().endsWith(".pdf") ? name : `${name}.pdf`;
+}
+
+/** True in the Android app (where printing isn't available yet). */
+export const isAndroidApp = isNativeApp && /Android/i.test(navigator.userAgent);
 
 async function readAsFile(path: string): Promise<File> {
   const { readFile } = await import("@tauri-apps/plugin-fs");

@@ -10,6 +10,6 @@
     "dialog:allow-message",
     "fs:allow-read-file",
     "fs:allow-write-file",
-    { "identifier": "fs:scope", "allow": [{ "path": "**" }] }
+    { "identifier": "fs:scope", "allow": [{ "path": "**" }, { "path": "content://**" }] }
   ]
 }
