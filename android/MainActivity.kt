@@ -47,6 +47,6 @@ class MainActivity : TauriActivity() {
       Log.w("PlainPDF", "Couldn't receive the PDF", e)
     }
     // Don't receive the same file again (for example after the screen turns).
-    intent.action = null
+    intent?.action = null
   }
 }
