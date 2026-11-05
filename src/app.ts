@@ -11,6 +11,7 @@ import { ToolManager } from "./core/tools";
 import { OverlayRenderer } from "./overlay/overlay-renderer";
 import { DrawTool } from "./tools/draw/draw-tool";
 import { SignatureController } from "./tools/sign/signature-controller";
+import { TextTool } from "./tools/text/text-tool";
 import { chooseSaveTarget, editedName } from "./save/save-file";
 import { askConfirm, askPassword, showMessage } from "./ui/dialog";
 import { showToast } from "./ui/toast";
@@ -51,18 +52,30 @@ export class App {
       this.tools.deactivate(),
     );
     this.tools.register(drawTool);
-    const signatures = new SignatureController(this.viewer, this.additions, this.history, renderer, this.hub);
+    const textTool = new TextTool(this.viewer, this.additions, this.history, renderer, () => this.tools.deactivate());
+    this.tools.register(textTool);
+    const signatures = new SignatureController(this.viewer, this.additions, this.history, renderer, this.hub, (item) => {
+      this.tools.activate("text");
+      textTool.edit(item);
+    });
 
     this.toolbar = new Toolbar(this.hub, {
       open: () => this.chooseFile(),
       toggleDraw: () => this.tools.toggle("draw"),
+      toggleText: () => this.tools.toggle("text"),
       save: () => void this.save(),
       sign: () => {
         this.tools.deactivate();
         void signatures.start();
       },
-      undo: () => this.history.undo(),
-      redo: () => this.history.redo(),
+      undo: () => {
+        textTool.commit();
+        this.history.undo();
+      },
+      redo: () => {
+        textTool.commit();
+        this.history.redo();
+      },
       zoomIn: () => this.viewer.zoomIn(),
       zoomOut: () => this.viewer.zoomOut(),
       fitToWidth: () => this.viewer.fitToWidth(),
@@ -87,7 +100,14 @@ export class App {
 
     const main = document.createElement("main");
     main.className = "main";
-    main.append(this.viewer.element, drawTool.options.element, this.startScreen, this.busy, this.dropHint);
+    main.append(
+      this.viewer.element,
+      drawTool.options.element,
+      textTool.options.element,
+      this.startScreen,
+      this.busy,
+      this.dropHint,
+    );
     root.append(this.toolbar.element, main, this.fileInput);
 
     this.setUpKeyboard();

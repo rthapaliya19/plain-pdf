@@ -366,8 +366,48 @@ input:focus-visible {
   inset: -12px;
 }
 
-.viewer.drawing .sig-box {
+.viewer.drawing .sig-box,
+.viewer.texting .sig-box {
   pointer-events: none;
+}
+
+/* ---------- Text ---------- */
+
+.viewer.texting .page {
+  cursor: text;
+}
+
+.added-text {
+  font-family: Arimo, Arial, Helvetica, sans-serif;
+  white-space: pre;
+}
+
+.being-edited {
+  display: none !important;
+}
+
+.text-editor {
+  position: absolute;
+  z-index: 3;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  outline: 1.5px dashed var(--accent);
+  outline-offset: 3px;
+  background: rgb(255 255 255 / 0.35);
+  font-family: Arimo, Arial, Helvetica, sans-serif;
+  line-height: 1.2;
+  white-space: pre;
+  overflow: hidden;
+  resize: none;
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+.text-size span {
+  font-weight: 600;
+  line-height: 1;
 }
 
 /* "Multiply" keeps text under the highlighter dark and readable. */
@@ -887,7 +927,7 @@ input:focus-visible {
     flex-direction: column;
     gap: 2px;
     height: 52px;
-    min-width: 64px;
+    min-width: 60px;
     font-size: 12px;
   }
 

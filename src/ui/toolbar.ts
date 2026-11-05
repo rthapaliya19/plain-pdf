@@ -9,6 +9,7 @@ import { icons } from "./icons";
 export interface ToolbarActions {
   open(): void;
   toggleDraw(): void;
+  toggleText(): void;
   sign(): void;
   save(): void;
   undo(): void;
@@ -28,6 +29,7 @@ export class Toolbar {
   private readonly toolGroup: HTMLDivElement;
   private readonly drawButton: HTMLButtonElement;
   private readonly signButton: HTMLButtonElement;
+  private readonly textButton: HTMLButtonElement;
   private readonly undoButton: HTMLButtonElement;
   private readonly redoButton: HTMLButtonElement;
   private readonly docControls: HTMLDivElement;
@@ -50,7 +52,11 @@ export class Toolbar {
     this.drawButton.classList.add("tool-button");
     this.drawButton.setAttribute("aria-pressed", "false");
     this.drawButton.addEventListener("click", () => actions.toggleDraw());
-    this.signButton = iconButton(icons.sign, "Sign", "Add your signature");
+    this.textButton = iconButton(icons.text, "Text", "Add text: tap the page and type (Esc to stop)");
+    this.textButton.classList.add("tool-button");
+    this.textButton.setAttribute("aria-pressed", "false");
+    this.textButton.addEventListener("click", () => actions.toggleText());
+    this.signButton = iconButton(icons.sign, "Sign", "Add your signature or initials");
     this.signButton.classList.add("tool-button");
     this.signButton.addEventListener("click", () => actions.sign());
     this.undoButton = iconButton(icons.undo, "Undo", `Undo (${MOD}+Z)`);
@@ -62,7 +68,7 @@ export class Toolbar {
     this.toolGroup = document.createElement("div");
     this.toolGroup.className = "tool-group";
     this.toolGroup.hidden = true;
-    this.toolGroup.append(this.drawButton, this.signButton, separator(), this.undoButton, this.redoButton);
+    this.toolGroup.append(this.drawButton, this.textButton, this.signButton, separator(), this.undoButton, this.redoButton);
 
     this.fileName = document.createElement("span");
     this.fileName.className = "file-name";
@@ -149,6 +155,7 @@ export class Toolbar {
     });
     hub.on("tool:changed", ({ id }) => {
       this.drawButton.setAttribute("aria-pressed", String(id === "draw"));
+      this.textButton.setAttribute("aria-pressed", String(id === "text"));
     });
   }
 

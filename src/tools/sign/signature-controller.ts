@@ -7,7 +7,7 @@
  * - Tap a signature to select it: drag it to move, drag the round corner
  *   handle to resize, tap × to remove it. Every change can be undone.
  */
-import { newAdditionMeta, type Additions, type PlacedSignature, type SignatureInk } from "../../core/additions";
+import { newAdditionMeta, type Additions, type PlacedSignature, type SignatureInk, type TextBox } from "../../core/additions";
 import type { EventHub } from "../../core/events";
 import type { History } from "../../core/history";
 import type { OverlayRenderer } from "../../overlay/overlay-renderer";
@@ -21,11 +21,16 @@ import { forgetInk, loadInk, saveInk, type InkKind } from "./signature-store";
 const DEFAULT_WIDTH: Record<InkKind, number> = { signature: 180, initials: 60 };
 const MIN_WIDTH = 30;
 
+/** Things you can select, drag and remove outside the tools: signatures, initials and text. */
+type Movable = PlacedSignature | TextBox;
+
 interface DragState {
   pointerId: number;
   mode: "move" | "resize";
-  before: PlacedSignature;
-  current: PlacedSignature;
+  before: Movable;
+  current: Movable;
+  /** Was it already selected when pressed? (A second tap on text edits it.) */
+  wasSelected: boolean;
   /** Pointer offset from the signature's top-left corner, in points (for moving). */
   offsetX: number;
   offsetY: number;
@@ -41,6 +46,8 @@ export class SignatureController {
     private readonly history: History,
     private readonly renderer: OverlayRenderer,
     hub: EventHub,
+    /** Called to edit text (double-click, or tapping text that's already selected). */
+    private readonly editText: (item: TextBox) => void,
   ) {
     const el = viewer.element;
     el.addEventListener("pointerdown", (e) => this.onDown(e));
@@ -50,6 +57,11 @@ export class SignatureController {
     el.addEventListener("click", (e) => {
       const button = (e.target as HTMLElement).closest<HTMLElement>(".sig-delete");
       if (button) this.remove(button.closest<HTMLElement>(".sig-box")?.dataset.id ?? "");
+    });
+    el.addEventListener("dblclick", (e) => {
+      const box = (e.target as HTMLElement).closest<HTMLElement>(".sig-box.text-box");
+      const item = box ? this.additions.get(box.dataset.id ?? "") : undefined;
+      if (item?.kind === "text") this.editText(item);
     });
     window.addEventListener("keydown", (e) => {
       const id = this.renderer.selectedSignature;
@@ -153,7 +165,7 @@ export class SignatureController {
 
   private remove(id: string): void {
     const sig = this.additions.get(id);
-    if (!sig || sig.kind !== "signature") return;
+    if (!sig || (sig.kind !== "signature" && sig.kind !== "text")) return;
     this.additions.remove(sig);
     this.history.record({
       undo: () => this.additions.add(sig),
@@ -164,7 +176,8 @@ export class SignatureController {
   // ---------- Selecting, moving and resizing ----------
 
   private onDown(e: PointerEvent): void {
-    if (this.viewer.element.classList.contains("drawing")) return;
+    const cls = this.viewer.element.classList;
+    if (cls.contains("drawing") || cls.contains("texting")) return;
     if (e.pointerType === "mouse" && e.button !== 0) return;
     const target = e.target as HTMLElement;
     if (target.closest(".sig-delete")) return; // handled on click
@@ -175,14 +188,16 @@ export class SignatureController {
       return;
     }
     const sig = this.additions.get(box.dataset.id ?? "");
-    if (!sig || sig.kind !== "signature" || this.drag) return;
+    if (!sig || (sig.kind !== "signature" && sig.kind !== "text") || this.drag) return;
     e.preventDefault();
+    const wasSelected = this.renderer.selectedSignature === sig.id;
     this.renderer.select(sig.id);
     this.viewer.element.setPointerCapture(e.pointerId);
     const p = this.viewer.toPagePoint(sig.page, e.clientX, e.clientY);
     this.drag = {
       pointerId: e.pointerId,
-      mode: target.closest(".sig-handle") ? "resize" : "move",
+      mode: sig.kind === "signature" && target.closest(".sig-handle") ? "resize" : "move",
+      wasSelected,
       before: sig,
       current: { ...sig },
       offsetX: p.x - sig.x,
@@ -199,7 +214,7 @@ export class SignatureController {
     if (d.mode === "move") {
       s.x = clamp(p.x - d.offsetX, 0, size.width - s.width);
       s.y = clamp(p.y - d.offsetY, 0, size.height - s.height);
-    } else {
+    } else if (s.kind === "signature") {
       // Keep the shape: width and height grow together.
       const aspect = s.ink.height / s.ink.width;
       const maxWidth = Math.min(size.width - s.x, (size.height - s.y) / aspect);
@@ -218,8 +233,12 @@ export class SignatureController {
       Math.abs(before.x - current.x) > 0.01 ||
       Math.abs(before.y - current.y) > 0.01 ||
       Math.abs(before.width - current.width) > 0.01;
-    if (!moved) return;
-    const after: PlacedSignature = { ...current };
+    if (!moved) {
+      // Tapping text that was already selected opens it for editing.
+      if (d.wasSelected && before.kind === "text") this.editText(before);
+      return;
+    }
+    const after: Movable = { ...current };
     this.additions.update(after);
     this.history.record({
       undo: () => this.additions.update(before),
