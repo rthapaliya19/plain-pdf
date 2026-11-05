@@ -15,6 +15,7 @@ import {
   LineJoinStyle,
   PDFDocument,
   PDFName,
+  PDFTextField,
   StandardFonts,
   type PDFFont,
   type PDFOperator,
@@ -74,15 +75,7 @@ export async function saveWithAdditions(
     throw error;
   }
 
-  if (options.lockForms) {
-    // Filled-in form answers become part of the page, like everything else.
-    try {
-      doc.getForm().flatten({ updateFieldAppearances: false });
-    } catch (error) {
-      // Some unusual forms can't be locked; their answers are still saved (editable).
-      console.info("Form answers saved but not locked:", error);
-    }
-  }
+  if (options.lockForms) lockFormAnswers(doc);
 
   const pages = doc.getPages();
   // Typed text uses Helvetica, a font every PDF reader has built in.
@@ -117,6 +110,35 @@ export async function saveWithAdditions(
   }
 
   return doc.save();
+}
+
+/**
+ * Filled-in form answers become part of the page, like everything else.
+ * Each text answer is redrawn fresh (Helvetica), so it looks right in every
+ * reader; boxes set to "automatic size" with several lines use 12 pt and wrap,
+ * like Adobe's apps do.
+ */
+function lockFormAnswers(doc: PDFDocument): void {
+  const form = doc.getForm();
+  try {
+    for (const field of form.getFields()) {
+      if (!(field instanceof PDFTextField)) continue;
+      const appearance = field.acroField.getDefaultAppearance() ?? "";
+      const size = parseFloat(/([\d.]+)\s+Tf/.exec(appearance)?.[1] ?? "0");
+      if (size === 0 && field.isMultiline()) field.setFontSize(12);
+      field.setText(field.getText() ?? "");
+    }
+    form.flatten();
+    return;
+  } catch (error) {
+    console.info("Couldn't redraw form answers; locking them as they are:", error);
+  }
+  try {
+    form.flatten({ updateFieldAppearances: false });
+  } catch (error) {
+    // Some unusual forms can't be locked; their answers are still saved (editable).
+    console.info("Form answers saved but not locked:", error);
+  }
 }
 
 /** A graphics setting that blends like a real highlighter: text underneath stays dark. */
