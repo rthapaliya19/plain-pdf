@@ -26,6 +26,7 @@ The full plan is in [docs/PLAN.md](docs/PLAN.md).
 - **Zoom:** the minus and plus buttons, Ctrl and the mouse wheel, pinching on a trackpad or phone, or Ctrl+= and Ctrl+-. Ctrl+0 or clicking the percentage fits the page to the window.
 - **Go to a page:** type the page number in the box at the top right and press Enter.
 - **Draw:** click **Draw**, then pick black, blue or red, the yellow highlighter, a thickness, or the eraser. Click **Draw** again (or press Esc) to stop. On a phone, one finger draws and two fingers scroll and zoom.
+- **Highlighter:** drag over text and it snaps to the words and lines you cover, like selecting text. On scanned pages (which are pictures, with no text the app can read) it draws a straight line, level when you drag roughly level.
 - **Undo / Redo:** the buttons, or Ctrl+Z and Ctrl+Y (Cmd+Z and Cmd+Shift+Z on Mac).
 
 ## For developers
@@ -51,6 +52,7 @@ src/
     additions.ts       everything added on top of the PDF (strokes now, signatures later)
     history.ts         undo and redo
     tools.ts           tools plug in here; one is active at a time
+    text-layout.ts     finds the lines and words of text on a page, so highlights can snap to them
   overlay/
     overlay-renderer.ts  shows additions on each page (highlight and ink layers)
     paths.ts             smoothing and eraser hit-testing for strokes

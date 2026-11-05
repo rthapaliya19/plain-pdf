@@ -27,6 +27,8 @@ async function watch(page, label) {
 }
 
 const count = (page, selector) => page.locator(selector).count();
+/** Anything drawn with the highlighter (text highlights and straight lines). */
+const HL = ".layer-highlight > [data-kind]";
 const pageBox = (page, n) => page.$eval(`.page[data-page="${n}"]`, (el) => {
   const r = el.getBoundingClientRect();
   return { x: r.left, y: r.top, w: r.width, h: r.height };
@@ -93,7 +95,8 @@ async function drag(page, from, to, steps = 12) {
   const scale = b.w / 612;
   const lineY = b.y + (150 + 2 * 22 - 4) * scale;
   await drag(page, [b.x + 48 * scale, lineY], [b.x + 400 * scale, lineY], 20);
-  check("highlighter draws in its own layer", (await count(page, ".layer-highlight path")) === 1);
+  check("highlighter draws in its own layer", (await count(page, HL)) === 1);
+  check("highlighter over text snaps to the text", (await count(page, '.layer-highlight > g[data-kind="highlight"] rect')) === 1);
   check("highlighter blends with multiply", (await page.$eval(".layer-highlight", (el) => getComputedStyle(el).mixBlendMode)) === "multiply");
   await page.screenshot({ path: `${SHOTS}/p2-d2-strokes.png` });
   await page.screenshot({ path: `${SHOTS}/p2-d3-highlight-closeup.png`, clip: { x: b.x + 30, y: lineY - 40, width: 560, height: 80 } });
@@ -113,18 +116,57 @@ async function drag(page, from, to, steps = 12) {
   }, { x: b.x + 50 * scale, y: lineY, w: 300 * scale });
   check("text exists under the highlight", darkest < 120, `darkest red channel ${darkest}`);
 
+  // ----- Highlighter follows the text -----
+  // Sample text: 11 pt Helvetica lines at x = 50 pt, baselines at 150 + 22 * n pt from the top.
+  const baselineOf = (n) => 150 + 22 * n; // n = 0 is the first body line
+  const toScreen = (x, y) => [b.x + x * scale, b.y + y * scale];
+  const lastRects = () => page.$$eval('.page[data-page="1"] .layer-highlight > g[data-kind="highlight"]', (gs) =>
+    [...gs[gs.length - 1].querySelectorAll("rect")].map((r) => ["x", "y", "width", "height"].map((k) => +r.getAttribute(k))));
+  // A wobbly, slightly sloped drag along line 6, from inside "quick" to the middle of the line.
+  await page.mouse.move(...toScreen(80, baselineOf(5) - 3));
+  await page.mouse.down();
+  for (let i = 1; i <= 20; i++) await page.mouse.move(...toScreen(80 + i * 12, baselineOf(5) - 3 + Math.sin(i) * 4 + i * 0.25));
+  await page.mouse.up();
+  let r = await lastRects();
+  check("wobbly drag gives one clean, level highlight", r.length === 1, JSON.stringify(r));
+  const top = baselineOf(5) - 0.82 * 11;
+  check("highlight matches the text line height", Math.abs(r[0][1] - top) < 1.2 && Math.abs(r[0][3] - 1.06 * 11 - 0.08 * 11 * 1.06) < 1.5, `y ${r[0][1].toFixed(1)} h ${r[0][3].toFixed(1)}`);
+  check("highlight starts at the start of the word", r[0][0] > 70 && r[0][0] < 74, `x ${r[0][0].toFixed(1)}`);
+  await page.screenshot({ path: `${SHOTS}/p2b-d1-snapped.png`, clip: { x: b.x + 30, y: b.y + (baselineOf(4)) * scale, width: 620, height: 60 } });
+
+  // Dragging down across lines highlights like selecting text.
+  await drag(page, toScreen(120, baselineOf(8) - 4), toScreen(200, baselineOf(11) - 2), 25);
+  r = await lastRects();
+  check("dragging across 4 lines highlights 4 lines", r.length === 4, `${r.length} rects`);
+  check("first line starts mid-line, middle lines are full", r[0][0] > 100 && Math.abs(r[1][0] - 50) < 1 && Math.abs(r[2][0] - 50) < 1, r.map((q) => q[0].toFixed(0)).join(","));
+  check("last line ends near the pointer", r[3][0] + r[3][2] < 230 && r[3][0] + r[3][2] > 190, `ends ${(r[3][0] + r[3][2]).toFixed(0)}`);
+  await page.screenshot({ path: `${SHOTS}/p2b-d2-multiline.png`, clip: { x: b.x + 30, y: b.y + baselineOf(7) * scale, width: 620, height: 110 } });
+
+  // Dragging upward works the same.
+  await drag(page, toScreen(200, baselineOf(7) - 3), toScreen(120, baselineOf(5) - 3), 15);
+  r = await lastRects();
+  check("dragging upward also works", r.length === 3, `${r.length} rects`);
+
+  // A tap in the gap between lines (no text) adds nothing.
+  const hlBefore = await count(page, HL);
+  await drag(page, toScreen(300, baselineOf(6) + 6.5), toScreen(300.5, baselineOf(6) + 6.5), 1);
+  check("tapping between lines adds nothing", (await count(page, HL)) === hlBefore);
+  // Remove these extra highlights again so the following checks see one highlight.
+  for (let i = 0; i < 3; i++) await page.keyboard.press("Control+z");
+  check("undo removes text highlights", (await count(page, HL)) === 1);
+
   // Undo / redo with buttons and keyboard
   await page.click('button[aria-label="Undo"]');
-  check("undo removes the highlight", (await count(page, ".layer-highlight path")) === 0);
+  check("undo removes the highlight", (await count(page, HL)) === 0);
   check("redo enabled", !(await page.isDisabled('button[aria-label="Redo"]')));
   await page.click('button[aria-label="Redo"]');
-  check("redo brings it back", (await count(page, ".layer-highlight path")) === 1);
+  check("redo brings it back", (await count(page, HL)) === 1);
   await page.keyboard.press("Control+z");
   await page.keyboard.press("Control+z");
-  check("Ctrl+Z twice undoes two steps", (await count(page, ".layer-highlight path")) === 0 && (await count(page, ".layer-ink path")) === 2);
+  check("Ctrl+Z twice undoes two steps", (await count(page, HL)) === 0 && (await count(page, ".layer-ink path")) === 2);
   await page.keyboard.press("Control+Shift+z");
   await page.keyboard.press("Control+y");
-  check("Ctrl+Shift+Z and Ctrl+Y redo", (await count(page, ".layer-highlight path")) === 1 && (await count(page, ".layer-ink path")) === 3);
+  check("Ctrl+Shift+Z and Ctrl+Y redo", (await count(page, HL)) === 1 && (await count(page, ".layer-ink path")) === 3);
 
   // Eraser: wipe across the first (black) stroke
   await page.click('button[aria-label="Eraser"]');
@@ -133,20 +175,20 @@ async function drag(page, from, to, steps = 12) {
   await drag(page, [b.x + 400, b.y + 345], [b.x + 405, b.y + 378], 15);
   const afterErase = await page.$$eval(".layer-ink path", (ps) => ps.map((p) => p.getAttribute("stroke")));
   check("eraser removes only the stroke it touched", afterErase.length === 2 && !afterErase.includes("#1a1a1a"), afterErase.join(","));
-  check("eraser leaves other drawings alone", (await count(page, ".layer-highlight path")) === 1);
+  check("eraser leaves other drawings alone", (await count(page, HL)) === 1);
   await page.keyboard.press("Control+z");
   check("undo brings the erased stroke back", (await count(page, ".layer-ink path")) === 3);
   // The eraser removes highlights too
   await drag(page, [b.x + 300 * scale, lineY - 25], [b.x + 300 * scale - 5, lineY + 25], 10);
-  const hlGone = (await count(page, ".layer-highlight path")) === 0;
+  const hlGone = (await count(page, HL)) === 0;
   await page.keyboard.press("Control+z");
-  check("eraser removes highlights too, and undo restores", hlGone && (await count(page, ".layer-highlight path")) === 1);
+  check("eraser removes highlights too, and undo restores", hlGone && (await count(page, HL)) === 1);
   // Erasing on an empty area does nothing and adds no undo step
   await drag(page, [b.x + 600, b.y + 700], [b.x + 650, b.y + 720]);
-  check("erasing empty space changes nothing", (await count(page, ".layer-ink path")) === 3 && (await count(page, ".layer-highlight path")) === 1);
+  check("erasing empty space changes nothing", (await count(page, ".layer-ink path")) === 3 && (await count(page, HL)) === 1);
   await page.keyboard.press("Control+z");
   // If no empty step was recorded, this undoes the last real change: the highlight.
-  check("...and adds no undo step", (await count(page, ".layer-highlight path")) === 0 && (await count(page, ".layer-ink path")) === 3);
+  check("...and adds no undo step", (await count(page, HL)) === 0 && (await count(page, ".layer-ink path")) === 3);
   await page.keyboard.press("Control+y");
 
   // Zoom keeps strokes in place on the page
@@ -215,6 +257,39 @@ async function drag(page, from, to, steps = 12) {
   await page.waitForSelector(".page-canvas");
   check("Discard opens the new file clean", (await count(page, ".layer path")) === 0 && (await page.isDisabled('button[aria-label="Undo"]')));
   check("Draw is off in the new file", !(await page.isVisible(".draw-options")));
+
+  // A very quick swipe right after choosing the highlighter on a newly opened file still snaps to text.
+  await page.click('button[aria-label="Draw"]');
+  await page.click('button[aria-label="Yellow highlighter"]');
+  b = await pageBox(page, 1);
+  const ls = b.w / 612; // lease-test: 20 pt text at x = 60, baseline 92 pt from the top
+  await drag(page, [b.x + 70 * ls, b.y + 86 * ls], [b.x + 250 * ls, b.y + 88 * ls], 2);
+  await page.waitForTimeout(300);
+  check("quick swipe right away still snaps to text", (await count(page, '.layer-highlight > g[data-kind="highlight"]')) === 1);
+  await page.keyboard.press("Control+z");
+  await page.keyboard.press("Escape");
+
+  // ----- Scanned pages (pictures, no readable text): straight highlighter lines -----
+  await page.setInputFiles("input[type=file]", pdf("scanned-letter.pdf"));
+  await page.waitForFunction(() => document.querySelector(".file-name")?.textContent === "scanned-letter.pdf");
+  await page.waitForSelector(".page-canvas");
+  await page.click('button[aria-label="Draw"]');
+  await page.click('button[aria-label="Yellow highlighter"]');
+  b = await pageBox(page, 1);
+  // A wobbly drag, sloping about 5 degrees.
+  await page.mouse.move(b.x + 120, b.y + 300);
+  await page.mouse.down();
+  for (let i = 1; i <= 20; i++) await page.mouse.move(b.x + 120 + i * 20, b.y + 300 + i * 1.75 + Math.sin(i) * 3);
+  await page.mouse.up();
+  const scanPath = await page.$$eval('.layer-highlight > path[data-kind="stroke"]', (ps) => ps.map((p) => p.getAttribute("d")));
+  const nums = scanPath[0] ? scanPath[0].match(/-?\d+(\.\d+)?/g).map(Number) : [];
+  check("scan: highlighter draws one straight line", scanPath.length === 1 && nums.length === 4, scanPath.join(" | "));
+  check("scan: nearly level line snaps level", nums.length === 4 && nums[1] === nums[3], scanPath[0]);
+  await drag(page, [b.x + 120, b.y + 500], [b.x + 320, b.y + 620], 10);
+  const steep = await page.$$eval('.layer-highlight > path[data-kind="stroke"]', (ps) => ps[1]?.getAttribute("d"));
+  const sn = steep ? steep.match(/-?\d+(\.\d+)?/g).map(Number) : [];
+  check("scan: a clearly sloped line stays sloped", sn.length === 4 && sn[3] - sn[1] > 30, steep);
+  await page.screenshot({ path: `${SHOTS}/p2b-d3-scan.png` });
 
   check("desktop: no privacy-lock violations", (await page.evaluate(() => window.__csp)).length === 0);
   check("desktop: no errors or warnings", problems.length === 0, problems.join(" | "));

@@ -20,7 +20,7 @@
 |---|---|
 | Open and view | Open button, drag and drop on computers, scroll, zoom, pinch to zoom, page number |
 | Pen | Black, blue, red, 3 thicknesses |
-| Highlighter | Yellow and see-through, so text stays readable |
+| Highlighter | Yellow and see-through, so text stays readable. Snaps to the words and lines of text you drag over; straight (level-snapping) lines on scans |
 | Eraser | Removes whole strokes. Only erases what was added, never the original PDF |
 | Undo / Redo | For everything added |
 | Signature | Draw once with finger, mouse or trackpad. Remembered on the device. Tap to place, drag to move, drag a corner to resize. Redraw or delete anytime. No PIN |
@@ -67,3 +67,5 @@ Each phase ends with a check-in: the owner tests and approves before the next ph
 - Features first in a browser preview, packaging afterwards.
 - macOS included from the start.
 - "Fit" zoom fits the page being read, capped at 125% on wide screens.
+- Highlighter follows the text (owner's first choice); straight lines where there is no readable text.
+- Signature: blue ink, one saved signature, appears in the middle of the visible page, drag to move, corner to resize, × to remove, no date. The eraser doesn't remove signatures.

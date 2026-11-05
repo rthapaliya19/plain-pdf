@@ -6,6 +6,7 @@ import { Additions } from "./core/additions";
 import { EventHub } from "./core/events";
 import { History } from "./core/history";
 import { NotAPdfError, PasswordCancelledError, openPdf, type PdfDocument } from "./core/pdf-engine";
+import { TextLayoutCache } from "./core/text-layout";
 import { ToolManager } from "./core/tools";
 import { OverlayRenderer } from "./overlay/overlay-renderer";
 import { DrawTool } from "./tools/draw/draw-tool";
@@ -34,11 +35,13 @@ export class App {
   private readonly dropHint: HTMLElement;
   private readonly fileInput: HTMLInputElement;
   private current: OpenFile | null = null;
+  /** Where the text sits on each page of the open file (for the highlighter). */
+  private textLayout: TextLayoutCache | null = null;
   private openCounter = 0;
 
   constructor(root: HTMLElement) {
     const renderer = new OverlayRenderer(this.viewer, this.additions, this.hub);
-    const drawTool = new DrawTool(this.viewer, this.additions, this.history, renderer);
+    const drawTool = new DrawTool(this.viewer, this.additions, this.history, renderer, () => this.textLayout);
     this.tools.register(drawTool);
 
     this.toolbar = new Toolbar(this.hub, {
@@ -114,6 +117,7 @@ export class App {
       }
       const previous = this.current;
       this.current = { name: file.name, bytes, doc };
+      this.textLayout = new TextLayoutCache((page) => doc.textFragments(page));
       this.tools.deactivate();
       this.additions.clear();
       this.history.clear();

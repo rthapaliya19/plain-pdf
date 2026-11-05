@@ -1,18 +1,25 @@
 /**
- * Everything the person adds on top of the PDF (pen strokes, highlights,
- * and later signatures). The original PDF is never changed; additions are
- * only written into a new copy when saving.
+ * Everything the person adds on top of the PDF: pen strokes, highlights and
+ * signatures. The original PDF is never changed; additions are only written
+ * into a new copy when saving.
  *
  * Positions are in PDF points (1/72 inch), measured from the top-left corner
  * of the page as it is shown on screen.
  */
 import type { EventHub } from "./events";
+import type { Rect } from "./text-layout";
 
-export interface Stroke {
-  kind: "stroke";
+interface Base {
   id: string;
   /** 0-based page index. */
   page: number;
+  /** Stacking order: higher numbers are drawn on top. */
+  order: number;
+}
+
+/** A freehand pen line, or a straight highlighter line (used where there's no text, e.g. scans). */
+export interface Stroke extends Base {
+  kind: "stroke";
   tool: "pen" | "highlighter";
   /** CSS colour, for example "#1d4ed8". */
   color: string;
@@ -20,11 +27,37 @@ export interface Stroke {
   width: number;
   /** Flat list of coordinates: x0, y0, x1, y1, ... */
   points: number[];
-  /** Stacking order: higher numbers are drawn on top. */
-  order: number;
 }
 
-export type Addition = Stroke;
+/** A highlight that follows the text: one rectangle per line of text. */
+export interface TextHighlight extends Base {
+  kind: "highlight";
+  color: string;
+  rects: Rect[];
+}
+
+/** The person's signature drawing, in its own coordinates (0..width, 0..height). */
+export interface SignatureInk {
+  width: number;
+  height: number;
+  /** Each stroke is a flat list of coordinates. */
+  strokes: number[][];
+  /** Line thickness, in the same units as the coordinates. */
+  lineWidth: number;
+  color: string;
+}
+
+/** A signature placed on a page. */
+export interface PlacedSignature extends Base {
+  kind: "signature";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  ink: SignatureInk;
+}
+
+export type Addition = Stroke | TextHighlight | PlacedSignature;
 
 let nextOrder = 1;
 let nextId = 1;
@@ -42,9 +75,20 @@ export class Additions {
     return this.items.size;
   }
 
+  get(id: string): Addition | undefined {
+    return this.items.get(id);
+  }
+
   add(...items: Addition[]): void {
     for (const item of items) this.items.set(item.id, item);
     this.changed(items);
+  }
+
+  /** Replaces an addition with a changed copy (same id). */
+  update(item: Addition): void {
+    const old = this.items.get(item.id);
+    this.items.set(item.id, item);
+    this.changed(old && old.page !== item.page ? [old, item] : [item]);
   }
 
   remove(...items: Addition[]): void {

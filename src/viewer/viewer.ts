@@ -77,6 +77,11 @@ export class Viewer {
     return this.pages.length;
   }
 
+  /** The page being read (0-based). */
+  get currentPageIndex(): number {
+    return this.currentPage - 1;
+  }
+
   /** Current on-screen size of one PDF point, in CSS pixels. */
   get cssPixelsPerPoint(): number {
     return this.zoom * CSS_PER_POINT;

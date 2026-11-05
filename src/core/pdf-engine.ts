@@ -6,6 +6,7 @@
 import {
   GlobalWorkerOptions,
   PasswordResponses,
+  Util,
   getDocument,
   type PDFDocumentLoadingTask,
   type PDFDocumentProxy,
@@ -24,6 +25,22 @@ export interface PageSize {
   height: number;
 }
 
+/**
+ * A run of text on a page, as positioned by the PDF, in PDF points from the
+ * top-left corner of the page as shown. Only left-to-right horizontal text is
+ * included. Scanned pages usually have none (they are just pictures).
+ */
+export interface TextFragment {
+  text: string;
+  /** Left edge. */
+  x: number;
+  /** Baseline (the line the letters sit on). */
+  baseline: number;
+  width: number;
+  /** Font size. */
+  size: number;
+}
+
 export interface RenderJob {
   promise: Promise<void>;
   cancel(): void;
@@ -35,6 +52,8 @@ export interface PdfDocument {
   readonly pageSizes: readonly PageSize[];
   /** Draws page `index` (0-based) onto `canvas`, `pixelsPerPoint` pixels per PDF point. */
   renderPage(index: number, canvas: HTMLCanvasElement, pixelsPerPoint: number): RenderJob;
+  /** Where the text on page `index` (0-based) sits. Used to make highlights follow the text. */
+  textFragments(index: number): Promise<TextFragment[]>;
   close(): Promise<void>;
 }
 
@@ -122,6 +141,22 @@ export async function openPdf(bytes: Uint8Array, askPassword: PasswordPrompt): P
         promise: task.promise,
         cancel: () => task.cancel(),
       };
+    },
+    async textFragments(index) {
+      const page = pages[index];
+      const viewport = page.getViewport({ scale: 1 });
+      const content = await page.getTextContent();
+      const fragments: TextFragment[] = [];
+      for (const item of content.items) {
+        if (!("str" in item) || item.str.trim() === "" || item.width <= 0) continue;
+        const tx = Util.transform(viewport.transform, item.transform);
+        // Keep only text that runs left to right, level with the page.
+        if (Math.abs(tx[1]) > 0.01 * Math.abs(tx[0]) || tx[0] <= 0) continue;
+        const size = Math.hypot(tx[2], tx[3]);
+        if (size <= 0) continue;
+        fragments.push({ text: item.str, x: tx[4], baseline: tx[5], width: item.width * viewport.scale, size });
+      }
+      return fragments;
     },
     async close() {
       await task.destroy();
