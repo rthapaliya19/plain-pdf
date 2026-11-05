@@ -106,5 +106,5 @@ Decisions:
 - [x] Round C: merge and split
 - [x] Round C: check-in
 - [x] Phase 5: Windows and Mac apps built (v1.0.0 release)
-- [ ] Phase 5: Android app built
+- [x] Phase 5: Android app built (signed with a one-off key until a saved key is set up)
 - [ ] Phase 5: owner installs on Windows, Pixel and Mac and sets as default
