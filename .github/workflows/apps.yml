@@ -1,10 +1,11 @@
-# Builds the installable apps and publishes them on the GitHub Releases page.
-# Runs when a version tag (like v1.0.0) is pushed.
+# Builds the installable apps and publishes them on the GitHub Releases page,
+# under the version in src-tauri/tauri.conf.json (for example v1.0.0).
+# Runs when code is pushed to the "release" branch.
 name: Build apps
 
 on:
   push:
-    tags: ["v*"]
+    branches: [release]
   workflow_dispatch:
 
 permissions:
@@ -41,8 +42,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: Plain PDF ${{ github.ref_name }}
+          tagName: v__VERSION__
+          releaseName: Plain PDF v__VERSION__
+          releaseCommitish: ${{ github.sha }}
           releaseBody: |
             Download the file for your device:
             - **Windows:** the `.exe` file (installer)
@@ -50,5 +52,5 @@ jobs:
             - **Android:** the `.apk` file
             These apps aren't from an app store, so your device asks you to confirm the first time. See the README for step-by-step instructions.
           releaseDraft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: false
           args: ${{ matrix.args }}
