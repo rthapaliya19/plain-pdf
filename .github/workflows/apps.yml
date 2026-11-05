@@ -1,0 +1,54 @@
+# Builds the installable apps and publishes them on the GitHub Releases page.
+# Runs when a version tag (like v1.0.0) is pushed.
+name: Build apps
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            runner: windows-latest
+            args: ""
+          - name: macOS (Apple chips and Intel)
+            runner: macos-latest
+            args: "--target universal-apple-darwin"
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.runner == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - run: npm ci
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Plain PDF ${{ github.ref_name }}
+          releaseBody: |
+            Download the file for your device:
+            - **Windows:** the `.exe` file (installer)
+            - **Mac:** the `.dmg` file
+            - **Android:** the `.apk` file
+            These apps aren't from an app store, so your device asks you to confirm the first time. See the README for step-by-step instructions.
+          releaseDraft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          args: ${{ matrix.args }}

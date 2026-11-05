@@ -3,7 +3,6 @@
 //! Everything else (viewing, drawing, saving) happens in the web app.
 
 use std::sync::Mutex;
-use tauri::Manager;
 
 /// PDFs the system asked to open that the web app hasn't picked up yet.
 #[derive(Default)]
@@ -36,7 +35,7 @@ pub fn run() {
             // On macOS, a double-clicked PDF arrives as an "opened" event instead.
             #[cfg(any(target_os = "macos", target_os = "ios"))]
             if let tauri::RunEvent::Opened { urls } = &event {
-                use tauri::Emitter;
+                use tauri::{Emitter, Manager};
                 let paths = urls
                     .iter()
                     .filter_map(|u| u.to_file_path().ok())
