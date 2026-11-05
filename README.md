@@ -30,6 +30,9 @@ The full plan is in [docs/PLAN.md](docs/PLAN.md).
 - **Text:** click **Text**, then tap anywhere on a page and type. Pick a size (small, medium, large) and black, blue or red. Tap elsewhere, **Done** or Esc to finish. Tap text to edit it; drag it to move it. Outside the Text tool, click text to select it (× removes it) and double-click (or tap it again) to edit.
 - **Forms:** fillable boxes, checkboxes, radio buttons and dropdowns just work: click and type. When you save, the answers are locked into the copy. Old Adobe "XFA" forms can't be filled.
 - **Links:** links inside the PDF jump to their page; web links ask before opening in your browser.
+- **Select and copy:** drag across text (or long-press on a phone) and copy it. Scanned pages have no text to select.
+- **Search:** click the magnifying glass (or Ctrl+F, Cmd+F on Mac). Matches are highlighted; Enter and Shift+Enter go to the next and previous match; Esc closes.
+- **Print:** in the **⋯ More** menu (or Ctrl+P, Cmd+P). Prints what a saved copy would contain, including your drawings, text, signatures and form answers.
 - **Sign:** click **Sign** to open the Sign panel with your **signature** and **initials**. The first time, tap "+ Add signature" or "+ Add initials" and draw them (they're saved only on this device). After that, tap one to place it, or use **Draw new** or **Remove**. A placed signature appears in the middle of the page you're viewing: drag it to move, drag the round corner to resize, and tap × (or press Delete) to remove it.
 - **Save:** click **Save** (or Ctrl+S, Cmd+S on Mac) to save a copy named "name-edited.pdf" with everything you added locked into the pages. The original file is never changed. In Chrome on a computer you choose where to save it; on phones it goes to Downloads. Encrypted (password-protected) PDFs can't be saved with changes yet.
 - **Undo / Redo:** the buttons, or Ctrl+Z and Ctrl+Y (Cmd+Z and Cmd+Shift+Z on Mac).
@@ -65,6 +68,9 @@ src/
     draw/              the Draw tool: pen, highlighter, eraser and its options strip
     sign/              signatures and initials: the pad, saving them on the device, placing, moving and resizing
     text/              the Text tool: typing on pages, sizes and colours
+    search/            the search bar and the page text index
+    print/             printing (pages drawn as pictures, then the print window)
+  ui/menu.ts           the More menu
   vendor/              form-field styles copied from PDF.js (Apache 2.0)
   save/
     save-pdf.ts        writes additions into a copy of the PDF (pdf-lib), exactly where they were drawn
@@ -88,6 +94,7 @@ tests/
   e2e/save.test.cjs      browser tests for saving (also checks saved files with Python's pypdf)
   e2e/text.test.cjs      browser tests for typing text
   e2e/forms.test.cjs     browser tests for filling forms and following links
+  e2e/roundb.test.cjs    browser tests for selecting and copying text, search and print
   fixtures/              sample PDFs used by the tests
 ```
 
@@ -108,6 +115,7 @@ node tests/e2e/sign.test.cjs
 node tests/e2e/save.test.cjs   # needs: pip install pypdf
 node tests/e2e/text.test.cjs
 node tests/e2e/forms.test.cjs
+node tests/e2e/roundb.test.cjs
 ```
 
 ## License

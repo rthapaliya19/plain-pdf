@@ -97,11 +97,11 @@ Decisions:
 - [x] Phases 0-4: viewer, draw, highlighter, signature and initials, save a copy
 - [x] Round A: add text
 - [x] Round A: fill forms and links
-- [ ] Round A: check-in
-- [ ] Round B: select and copy text
-- [ ] Round B: search
-- [ ] Round B: print
-- [ ] Round B: check-in
+- [x] Round A: check-in
+- [x] Round B: select and copy text
+- [x] Round B: search
+- [x] Round B: print
+- [ ] Round B: check-in (owner will test B and C together)
 - [ ] Round C: organize pages (rotate, delete, reorder)
 - [ ] Round C: merge and split
 - [ ] Round C: check-in
