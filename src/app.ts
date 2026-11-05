@@ -7,6 +7,8 @@ import { EventHub } from "./core/events";
 import { History } from "./core/history";
 import { NotAPdfError, PasswordCancelledError, openPdf, type PdfDocument } from "./core/pdf-engine";
 import { TextLayoutCache } from "./core/text-layout";
+import { appendPages, deletePages, movePages, pickPages, rotatePages, samePlan, type PagesState } from "./core/page-ops";
+import { firstPlan, isUnchanged, workspaceDocument, type PageEntry, type Source } from "./core/workspace";
 import { ToolManager } from "./core/tools";
 import { OverlayRenderer } from "./overlay/overlay-renderer";
 import { DrawTool } from "./tools/draw/draw-tool";
@@ -14,6 +16,7 @@ import { SignatureController } from "./tools/sign/signature-controller";
 import { TextTool } from "./tools/text/text-tool";
 import { printDocument } from "./tools/print/print";
 import { Search } from "./tools/search/search";
+import { OrganizeScreen } from "./tools/organize/organize-screen";
 import { chooseSaveTarget, editedName } from "./save/save-file";
 import { askConfirm, askPassword, showMessage } from "./ui/dialog";
 import { showToast } from "./ui/toast";
@@ -25,7 +28,11 @@ import { Viewer } from "./viewer/viewer";
 export interface OpenFile {
   name: string;
   bytes: Uint8Array;
+  /** The page list as one document (see core/workspace.ts). */
   doc: PdfDocument;
+  /** The opened file first, then any files whose pages were added. */
+  sources: Source[];
+  plan: PageEntry[];
 }
 
 export class App {
@@ -37,6 +44,7 @@ export class App {
   private readonly tools = new ToolManager(this.hub);
   private readonly toolbar: Toolbar;
   private readonly search: Search;
+  private readonly organize: OrganizeScreen;
   private readonly startScreen: HTMLElement;
   private readonly busy: HTMLElement;
   private readonly dropHint: HTMLElement;
@@ -105,6 +113,28 @@ export class App {
     const main = document.createElement("main");
     main.className = "main";
     this.search = new Search(this.viewer, this.hub, () => this.current?.doc ?? null);
+    this.organize = new OrganizeScreen(this.hub, {
+      doc: () => this.current?.doc ?? null,
+      pageKey: (i) => {
+        const e = this.current?.plan[i];
+        return e ? `${e.source}:${e.index}:${e.rotation}` : String(i);
+      },
+      rotate: (pages, by) => this.rotatePages(pages, by),
+      remove: (pages) => this.deletePages(pages),
+      move: (pages, before) => this.movePages(pages, before),
+      addFiles: (files) => this.addPagesFromFiles(files),
+      saveSelected: (pages) => this.saveSelectedPages(pages),
+      undo: () => this.history.undo(),
+      redo: () => this.history.redo(),
+      canUndo: () => this.history.canUndo,
+      canRedo: () => this.history.canRedo,
+    });
+    document.body.append(this.organize.element);
+    this.toolbar.moreMenu.add(icons.pages, "Organize pages", "", () => {
+      this.tools.deactivate();
+      this.organize.open();
+    });
+    this.toolbar.moreMenu.add(icons.addFile, "Add pages from another PDF", "", () => this.organize.chooseFilesToAdd());
     this.toolbar.moreMenu.add(icons.print, "Print", isMac() ? "⌘P" : "Ctrl+P", () => void this.print());
 
     main.append(
@@ -142,7 +172,9 @@ export class App {
 
   /** Something was added or a form was filled in. */
   private get hasChanges(): boolean {
-    return this.additions.size > 0 || Boolean(this.current?.doc.formsModified);
+    const file = this.current;
+    if (!file) return false;
+    return this.additions.size > 0 || file.doc.formsModified || !isUnchanged(file.sources, file.plan);
   }
 
   private get hasUnsavedChanges(): boolean {
@@ -173,24 +205,24 @@ export class App {
     this.busy.hidden = false;
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
-      const doc = await openPdf(bytes, askPassword);
+      const base = await openPdf(bytes, askPassword);
       if (ticket !== this.openCounter) {
         // Another file was opened while this one was loading.
-        await doc.close();
+        await base.close();
         return;
       }
       const previous = this.current;
-      this.current = { name: file.name, bytes, doc };
+      this.organize.close();
+      const sources: Source[] = [{ name: file.name, bytes, doc: base }];
+      const plan = firstPlan(base);
+      const doc = workspaceDocument(sources, plan);
+      this.current = { name: file.name, bytes, doc, sources, plan };
       this.textLayout = new TextLayoutCache((page) => doc.textFragments(page));
       this.tools.deactivate();
       this.additions.clear();
       this.history.clear();
       this.dirty = false;
-      doc.onFormsChanged(() => {
-        if (this.current?.doc !== doc) return;
-        this.dirty = true;
-        this.toolbar.setSaveEnabled(true);
-      });
+      this.watchForms(base);
       this.viewer.show(doc);
       this.toolbar.setSaveEnabled(false);
       if (doc.isXfaForm) {
@@ -261,12 +293,143 @@ export class App {
   }
 
   /** A copy of the open file with everything added (and form answers) locked in. */
-  private async buildCopy(file: OpenFile): Promise<Uint8Array> {
+  private async buildCopy(file: OpenFile, state: PagesState = this.pagesState(file)): Promise<Uint8Array> {
     // The saving code (pdf-lib) is only loaded the first time it's needed.
-    const { saveWithAdditions } = await import("./save/save-pdf");
-    const filledForms = file.doc.formsModified;
-    const base = filledForms ? await file.doc.bytesWithFormValues() : file.bytes;
-    return saveWithAdditions(base, this.additions.all(), file.doc.pageToPdf, { lockForms: filledForms });
+    const { saveWithAdditions, saveWorkspace } = await import("./save/save-pdf");
+    if (isUnchanged(file.sources, state.plan)) {
+      const filledForms = file.doc.formsModified;
+      const base = filledForms ? await file.doc.bytesWithFormValues() : file.bytes;
+      return saveWithAdditions(base, state.additions, file.doc.pageToPdf, { lockForms: filledForms });
+    }
+    // Pages were reorganized or added: build a new file from the page list.
+    const sources = await Promise.all(
+      file.sources.map(async (s) => ({ bytes: s.doc.formsModified ? await s.doc.bytesWithFormValues() : s.bytes })),
+    );
+    const placed = workspaceDocument(file.sources, state.plan);
+    return saveWorkspace(sources, state.plan, state.additions, placed.pageToPdf);
+  }
+
+  // ---------- Pages: rotate, delete, move, add, save selected ----------
+
+  private pagesState(file: OpenFile): PagesState {
+    return { plan: file.plan, additions: this.additions.all() };
+  }
+
+  /** Form answers in any of the open files count as changes. */
+  private watchForms(doc: PdfDocument): void {
+    doc.onFormsChanged(() => {
+      if (!this.current?.sources.some((s) => s.doc === doc)) return;
+      this.dirty = true;
+      this.toolbar.setSaveEnabled(true);
+    });
+  }
+
+  /** Shows a page list (after an operation, or undoing one). */
+  private showPages(file: OpenFile, state: PagesState): void {
+    if (this.current !== file) return;
+    this.tools.deactivate();
+    const keep = this.viewer.currentPageIndex + 1;
+    file.plan = state.plan;
+    file.doc = workspaceDocument(file.sources, state.plan);
+    const doc = file.doc;
+    this.textLayout = new TextLayoutCache((page) => doc.textFragments(page));
+    this.viewer.show(doc, keep);
+    this.hub.emit("document:opened", { name: file.name, pageCount: doc.pageCount });
+    this.additions.replaceAll(state.additions);
+    this.dirty = true;
+    this.toolbar.setSaveEnabled(this.hasChanges);
+    this.hub.emit("pages:changed", { pageCount: doc.pageCount });
+  }
+
+  /** Runs a page operation, with undo. */
+  private pageOperation(change: (state: PagesState) => PagesState): void {
+    const file = this.current;
+    if (!file) return;
+    const before = this.pagesState(file);
+    const after = change(before);
+    if (samePlan(before.plan, after.plan) && before.additions.length === after.additions.length && before.additions.every((a, i) => a === after.additions[i])) return;
+    this.showPages(file, after);
+    this.history.record({ undo: () => this.showPages(file, before), redo: () => this.showPages(file, after) });
+  }
+
+  get pageCount(): number {
+    return this.current?.doc.pageCount ?? 0;
+  }
+
+  get currentDocument(): PdfDocument | null {
+    return this.current?.doc ?? null;
+  }
+
+  rotatePages(pages: number[], by: number): void {
+    const sizes = this.current?.doc.pageSizes ?? [];
+    this.pageOperation((s) => rotatePages(s, pages, by, sizes));
+  }
+
+  deletePages(pages: number[]): boolean {
+    if (pages.length === 0 || pages.length >= this.pageCount) return false;
+    this.pageOperation((s) => deletePages(s, pages));
+    return true;
+  }
+
+  movePages(pages: number[], before: number): void {
+    this.pageOperation((s) => movePages(s, pages, before));
+  }
+
+  /** Adds all pages of one or more PDF files to the end. */
+  async addPagesFromFiles(files: File[]): Promise<void> {
+    const file = this.current;
+    if (!file || files.length === 0) return;
+    const entries: PageEntry[] = [];
+    const names: string[] = [];
+    for (const f of files) {
+      try {
+        const bytes = new Uint8Array(await f.arrayBuffer());
+        const doc = await openPdf(bytes, askPassword);
+        if (this.current !== file) return void doc.close();
+        file.sources.push({ name: f.name, bytes, doc });
+        this.watchForms(doc);
+        const source = file.sources.length - 1;
+        entries.push(...doc.pageSizes.map((_, index) => ({ source, index, rotation: 0 })));
+        names.push(f.name);
+      } catch (error) {
+        if (error instanceof PasswordCancelledError) continue;
+        await showMessage(`Can't add "${f.name}"`, error instanceof NotAPdfError ? error.message : "Something went wrong while opening it.");
+      }
+    }
+    if (entries.length === 0) return;
+    this.pageOperation((s) => appendPages(s, entries));
+    showToast(`Added ${entries.length} page${entries.length === 1 ? "" : "s"} from ${names.join(", ")}.`);
+  }
+
+  /** "Save selected pages as a new PDF". */
+  async saveSelectedPages(pages: number[]): Promise<void> {
+    const file = this.current;
+    if (!file || pages.length === 0 || this.saving) return;
+    if (file.doc.encrypted) {
+      await showMessage("Can't save this file yet", "This PDF is encrypted (password-protected), so Plain PDF can't save pages from it yet.");
+      return;
+    }
+    const target = await chooseSaveTarget(editedName(file.name).replace(/-edited\.pdf$/, "-selected.pdf"));
+    if (!target) return;
+    this.saving = true;
+    this.busy.querySelector("p")!.textContent = "Saving the selected pages…";
+    this.busy.hidden = false;
+    try {
+      const picked = pickPages(this.pagesState(file), pages);
+      const { saveWorkspace } = await import("./save/save-pdf");
+      const sources = await Promise.all(
+        file.sources.map(async (s) => ({ bytes: s.doc.formsModified ? await s.doc.bytesWithFormValues() : s.bytes })),
+      );
+      const bytes = await saveWorkspace(sources, picked.plan, picked.additions, workspaceDocument(file.sources, picked.plan).pageToPdf);
+      await target.write(bytes);
+      showToast(`Saved ${pages.length} page${pages.length === 1 ? "" : "s"} as ${target.name}`, 5000);
+    } catch (error) {
+      console.error(error);
+      await showMessage("Couldn't save", "Something went wrong while saving the selected pages.");
+    } finally {
+      this.saving = false;
+      this.busy.hidden = true;
+    }
   }
 
   /** Prints the document as it would be saved: with your drawings, text and signatures. */

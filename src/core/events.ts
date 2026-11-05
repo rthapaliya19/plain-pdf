@@ -11,6 +11,8 @@ export type AppEvents = {
   /** Drawings or other additions changed on these pages (0-based). */
   "additions:changed": { pages: number[] };
   "history:changed": { canUndo: boolean; canRedo: boolean };
+  /** Pages were rotated, deleted, moved or added (or that was undone). */
+  "pages:changed": { pageCount: number };
   /** The active tool changed. null = just viewing. */
   "tool:changed": { id: string | null };
 };

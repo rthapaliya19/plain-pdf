@@ -174,8 +174,8 @@ export class Viewer {
     this.element.style.setProperty("--total-scale-factor", ppp);
   }
 
-  /** Shows a newly opened document, replacing any previous one. */
-  show(doc: PdfDocument): void {
+  /** Shows a newly opened document, replacing any previous one. `keepPage` stays on that page (1-based). */
+  show(doc: PdfDocument, keepPage?: number): void {
     this.clear();
     this.doc = doc;
     this.currentPage = 1;
@@ -210,6 +210,7 @@ export class Viewer {
     this.element.scrollTop = 0;
     this.element.scrollLeft = 0;
     this.hub.emit("page:changed", { page: 1, pageCount: this.pages.length });
+    if (keepPage && keepPage > 1) this.goToPage(Math.min(keepPage, this.pages.length));
     this.updatePointSize();
     this.hub.emit("zoom:changed", { zoom: this.zoom, fitWidth: this.fit });
     this.element.focus({ preventScroll: true });

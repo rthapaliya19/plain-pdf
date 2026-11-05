@@ -134,6 +134,14 @@ export class Additions {
     this.changed(old && old.page !== item.page ? [old, item] : [item]);
   }
 
+  /** Replaces everything (after a page operation, or undoing one). */
+  replaceAll(items: Addition[]): void {
+    const pages = new Set([...this.items.values()].map((a) => a.page));
+    this.items = new Map(items.map((a) => [a.id, a]));
+    for (const a of items) pages.add(a.page);
+    if (pages.size) this.hub.emit("additions:changed", { pages: [...pages] });
+  }
+
   remove(...items: Addition[]): void {
     for (const item of items) this.items.delete(item.id);
     this.changed(items);
