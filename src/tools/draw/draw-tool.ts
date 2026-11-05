@@ -26,7 +26,14 @@ import { hitsStroke } from "../../overlay/paths";
 import type { OverlayRenderer } from "../../overlay/overlay-renderer";
 import type { Viewer } from "../../viewer/viewer";
 import { DrawOptions } from "./draw-options";
-import { HIGHLIGHTER_COLOR, SIZES, loadSettings, saveSettings, type DrawSettings } from "./settings";
+import {
+  HIGHLIGHTER_COLOR,
+  HIGHLIGHTER_LINE_WIDTH,
+  PEN_SIZES,
+  loadSettings,
+  saveSettings,
+  type DrawSettings,
+} from "./settings";
 
 /** A line started this recently is dropped if a second finger lands (it was meant as a scroll). */
 const SECOND_FINGER_GRACE_MS = 300;
@@ -92,15 +99,20 @@ export class DrawTool implements Tool {
     private readonly history: History,
     private readonly overlay: OverlayRenderer,
     private readonly textLayout: () => TextLayoutCache | null,
+    onDone: () => void,
   ) {
-    this.options = new DrawOptions(this.settings, (settings) => {
-      this.settings = settings;
-      saveSettings(settings);
-      if (this.active) {
-        this.viewer.setDrawingMode(settings.mode === "eraser" ? "eraser" : "pen");
-        if (settings.mode === "highlighter") this.prefetchText();
-      }
-    });
+    this.options = new DrawOptions(
+      this.settings,
+      (settings) => {
+        this.settings = settings;
+        saveSettings(settings);
+        if (this.active) {
+          this.viewer.setDrawingMode(settings.mode === "eraser" ? "eraser" : "pen");
+          if (settings.mode === "highlighter") this.prefetchText();
+        }
+      },
+      onDone,
+    );
 
     const el = viewer.element;
     el.addEventListener("pointerdown", (e) => this.onDown(e));
@@ -171,7 +183,7 @@ export class DrawTool implements Tool {
         page,
         tool: "pen",
         color: this.settings.penColor,
-        width: SIZES.pen[this.settings.size],
+        width: PEN_SIZES[this.settings.size],
         points: [point.x, point.y],
       };
       this.gesture = {
@@ -312,7 +324,7 @@ export class DrawTool implements Tool {
         page,
         tool: "highlighter",
         color: HIGHLIGHTER_COLOR,
-        width: SIZES.highlighter[this.settings.size],
+        width: HIGHLIGHTER_LINE_WIDTH,
         points: [start.x, start.y, start.x, start.y],
       },
       path: null,

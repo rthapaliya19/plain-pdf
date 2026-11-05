@@ -1,8 +1,9 @@
 /**
- * Placing, moving, resizing and removing signatures on the page.
+ * Placing, moving, resizing and removing signatures and initials.
  *
- * - The Sign button places your saved signature in the middle of the page
- *   you're looking at (asking you to draw it first if there isn't one).
+ * - The Sign button opens the Sign panel: tap your signature or initials to
+ *   place it in the middle of the page you're looking at (an empty slot
+ *   asks you to draw it first).
  * - Tap a signature to select it: drag it to move, drag the round corner
  *   handle to resize, tap × to remove it. Every change can be undone.
  */
@@ -13,11 +14,11 @@ import type { OverlayRenderer } from "../../overlay/overlay-renderer";
 import { askConfirm } from "../../ui/dialog";
 import { showToast } from "../../ui/toast";
 import type { Viewer } from "../../viewer/viewer";
-import { chooseSignatureAction, drawSignature } from "./signature-dialogs";
-import { forgetSignature, loadSignature, saveSignature } from "./signature-store";
+import { chooseFromSignPanel, drawInk } from "./signature-dialogs";
+import { forgetInk, loadInk, saveInk, type InkKind } from "./signature-store";
 
-/** Starting width of a placed signature, in points (about 2.5 inches). */
-const DEFAULT_WIDTH = 180;
+/** Starting width of a placed signature, in points (about 2.5 inches). Initials start at a third of that. */
+const DEFAULT_WIDTH: Record<InkKind, number> = { signature: 180, initials: 60 };
 const MIN_WIDTH = 30;
 
 interface DragState {
@@ -76,40 +77,39 @@ export class SignatureController {
     if (this.busy || !this.viewer.hasDocument) return;
     this.busy = true;
     try {
-      let ink = loadSignature();
-      if (ink) {
-        const choice = await chooseSignatureAction(ink);
-        if (choice === null) return;
-        if (choice === "remove") {
-          const sure = await askConfirm(
-            "Remove your saved signature?",
-            "It will be deleted from this device. Signatures already placed on this page stay until you remove them.",
-            "Remove",
-            "Keep it",
-          );
-          if (sure) {
-            forgetSignature();
-            showToast("Your signature was removed from this device.");
-          }
-          return;
+      const choice = await chooseFromSignPanel({ signature: loadInk("signature"), initials: loadInk("initials") });
+      if (!choice) return;
+      const { kind, action } = choice;
+      const name = kind === "signature" ? "signature" : "initials";
+      if (action === "remove") {
+        const sure = await askConfirm(
+          `Remove your saved ${name}?`,
+          `They will be deleted from this device. Any ${name} already placed on the page stay until you remove them.`,
+          "Remove",
+          "Keep",
+        );
+        if (sure) {
+          forgetInk(kind);
+          showToast(`Your ${name} ${kind === "signature" ? "was" : "were"} removed from this device.`);
         }
-        if (choice === "redraw") ink = null;
+        return;
       }
+      let ink = action === "place" ? loadInk(kind) : null;
       if (!ink) {
-        ink = await drawSignature();
+        ink = await drawInk(kind);
         if (!ink) return;
-        if (!saveSignature(ink)) {
-          showToast("This browser won't let the app remember your signature, so it works until you close this page.", 6000);
+        if (!saveInk(kind, ink)) {
+          showToast(`This browser won't let the app remember your ${name}, so they work until you close this page.`, 6000);
         }
       }
-      this.place(ink);
+      this.place(ink, kind);
     } finally {
       this.busy = false;
     }
   }
 
-  /** Puts the signature in the middle of the part of the page you're looking at. */
-  private place(ink: SignatureInk): void {
+  /** Puts the signature or initials in the middle of the part of the page you're looking at. */
+  private place(ink: SignatureInk, role: InkKind): void {
     const rect = this.viewer.element.getBoundingClientRect();
     const cx = rect.left + rect.width / 2;
     const cy = rect.top + rect.height / 2;
@@ -117,7 +117,7 @@ export class SignatureController {
     const size = this.viewer.pageSize(page);
     const center = this.viewer.toPagePoint(page, cx, cy);
 
-    let width = Math.min(DEFAULT_WIDTH, size.width * 0.45);
+    let width = Math.min(DEFAULT_WIDTH[role], size.width * 0.45);
     let height = (width * ink.height) / ink.width;
     if (height > size.height * 0.2) {
       height = size.height * 0.2;
@@ -133,6 +133,7 @@ export class SignatureController {
     }
     const sig: PlacedSignature = {
       kind: "signature",
+      role,
       ...newAdditionMeta(),
       page,
       x,

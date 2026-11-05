@@ -1,18 +1,23 @@
 /**
- * Remembers your signature on this device only (the browser's private
- * storage for this app; later, the installed app's private storage).
- * It is never uploaded or synced anywhere.
+ * Remembers your signature and your initials on this device only (the
+ * browser's private storage for this app; later, the installed app's
+ * private storage). They are never uploaded or synced anywhere.
  */
 import type { SignatureInk } from "../../core/additions";
 
-const STORAGE_KEY = "plain-pdf:signature";
+export type InkKind = "signature" | "initials";
+
+const STORAGE_KEYS: Record<InkKind, string> = {
+  signature: "plain-pdf:signature",
+  initials: "plain-pdf:initials",
+};
 
 /** Blue ink, like a ballpoint pen. */
 export const SIGNATURE_COLOR = "#1e40af";
 
-export function loadSignature(): SignatureInk | null {
+export function loadInk(kind: InkKind): SignatureInk | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEYS[kind]);
     if (!raw) return null;
     const data = JSON.parse(raw) as { v?: number; ink?: SignatureInk };
     const ink = data?.ink;
@@ -24,18 +29,18 @@ export function loadSignature(): SignatureInk | null {
 }
 
 /** Returns false if this device won't let the app store it (for example a private window). */
-export function saveSignature(ink: SignatureInk): boolean {
+export function saveInk(kind: InkKind, ink: SignatureInk): boolean {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ v: 1, ink }));
+    localStorage.setItem(STORAGE_KEYS[kind], JSON.stringify({ v: 1, ink }));
     return true;
   } catch {
     return false;
   }
 }
 
-export function forgetSignature(): void {
+export function forgetInk(kind: InkKind): void {
   try {
-    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(STORAGE_KEYS[kind]);
   } catch {
     // Nothing stored, or storage unavailable: either way it's gone.
   }

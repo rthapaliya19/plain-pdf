@@ -11,11 +11,14 @@ export const PEN_COLORS = [
 
 export const HIGHLIGHTER_COLOR = "#ffe34a";
 
-/** Thickness in PDF points for thin, medium and thick. */
-export const SIZES: Record<"pen" | "highlighter", readonly [number, number, number]> = {
-  pen: [1, 2, 3.5],
-  highlighter: [8, 14, 20],
-};
+/** Pen thickness in PDF points for thin, medium and thick. */
+export const PEN_SIZES = [1, 2, 3.5] as const;
+
+/**
+ * Thickness of the straight highlighter line used where there's no
+ * readable text (scans). Over text, highlights follow the text's height.
+ */
+export const HIGHLIGHTER_LINE_WIDTH = 14;
 
 export const SIZE_NAMES = ["Thin", "Medium", "Thick"] as const;
 

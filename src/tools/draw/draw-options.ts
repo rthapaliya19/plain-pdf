@@ -1,6 +1,7 @@
 /**
  * The small strip of drawing options shown while Draw is on:
- * three pen colours, the highlighter, three thicknesses and the eraser.
+ * three pen colours, the highlighter, the eraser, three thicknesses (only
+ * for the pen; the highlighter hugs the text, so it needs none) and Done.
  */
 import { icons } from "../../ui/icons";
 import {
@@ -17,9 +18,10 @@ export class DrawOptions {
   private readonly highlighterButton: HTMLButtonElement;
   private readonly sizeButtons: HTMLButtonElement[] = [];
   private readonly eraserButton: HTMLButtonElement;
+  private readonly sizeGroup: HTMLDivElement;
   private settings: DrawSettings;
 
-  constructor(initial: DrawSettings, onChange: (settings: DrawSettings) => void) {
+  constructor(initial: DrawSettings, onChange: (settings: DrawSettings) => void, onDone: () => void) {
     this.settings = { ...initial };
     this.element = document.createElement("div");
     this.element.className = "draw-options";
@@ -53,11 +55,7 @@ export class DrawOptions {
       const dot = document.createElement("span");
       dot.className = `dot dot-${index}`;
       b.append(dot);
-      b.addEventListener("click", () => {
-        // Picking a thickness while erasing switches back to the last pen.
-        const mode = this.settings.mode === "eraser" ? "pen" : this.settings.mode;
-        change({ size: index as SizeIndex, mode });
-      });
+      b.addEventListener("click", () => change({ size: index as SizeIndex, mode: "pen" }));
       this.sizeButtons.push(b);
     });
 
@@ -66,10 +64,19 @@ export class DrawOptions {
     this.eraserButton.innerHTML = icons.eraser;
     this.eraserButton.addEventListener("click", () => change({ mode: "eraser" }));
 
+    const done = document.createElement("button");
+    done.type = "button";
+    done.className = "done-button";
+    done.title = "Stop drawing (Esc)";
+    done.innerHTML = icons.check;
+    done.append("Done");
+    done.addEventListener("click", () => onDone());
+
+    this.sizeGroup = group(...this.sizeButtons);
     this.element.append(
-      group(...this.colorButtons, this.highlighterButton),
-      group(...this.sizeButtons),
-      group(this.eraserButton),
+      group(...this.colorButtons, this.highlighterButton, this.eraserButton),
+      this.sizeGroup,
+      group(done),
     );
     this.refresh();
   }
@@ -89,10 +96,11 @@ export class DrawOptions {
     });
     setPressed(this.highlighterButton, mode === "highlighter");
     setPressed(this.eraserButton, mode === "eraser");
-    const dotColor = mode === "highlighter" ? HIGHLIGHTER_COLOR : penColor;
+    // Thickness only matters for the pen.
+    this.sizeGroup.hidden = mode !== "pen";
     this.sizeButtons.forEach((b, i) => {
-      setPressed(b, mode !== "eraser" && size === i);
-      b.style.setProperty("--dot", dotColor);
+      setPressed(b, size === i);
+      b.style.setProperty("--dot", penColor);
     });
   }
 }

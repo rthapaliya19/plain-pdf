@@ -11,7 +11,9 @@ import { ToolManager } from "./core/tools";
 import { OverlayRenderer } from "./overlay/overlay-renderer";
 import { DrawTool } from "./tools/draw/draw-tool";
 import { SignatureController } from "./tools/sign/signature-controller";
+import { chooseSaveTarget, editedName } from "./save/save-file";
 import { askConfirm, askPassword, showMessage } from "./ui/dialog";
+import { showToast } from "./ui/toast";
 import { icons } from "./ui/icons";
 import { Toolbar } from "./ui/toolbar";
 import { Viewer } from "./viewer/viewer";
@@ -36,19 +38,25 @@ export class App {
   private readonly dropHint: HTMLElement;
   private readonly fileInput: HTMLInputElement;
   private current: OpenFile | null = null;
+  /** Changes made since the file was opened or last saved. */
+  private dirty = false;
+  private saving = false;
   /** Where the text sits on each page of the open file (for the highlighter). */
   private textLayout: TextLayoutCache | null = null;
   private openCounter = 0;
 
   constructor(root: HTMLElement) {
     const renderer = new OverlayRenderer(this.viewer, this.additions, this.hub);
-    const drawTool = new DrawTool(this.viewer, this.additions, this.history, renderer, () => this.textLayout);
+    const drawTool = new DrawTool(this.viewer, this.additions, this.history, renderer, () => this.textLayout, () =>
+      this.tools.deactivate(),
+    );
     this.tools.register(drawTool);
     const signatures = new SignatureController(this.viewer, this.additions, this.history, renderer, this.hub);
 
     this.toolbar = new Toolbar(this.hub, {
       open: () => this.chooseFile(),
       toggleDraw: () => this.tools.toggle("draw"),
+      save: () => void this.save(),
       sign: () => {
         this.tools.deactivate();
         void signatures.start();
@@ -87,8 +95,17 @@ export class App {
 
     // Warn before closing or reloading the window with unsaved drawings.
     window.addEventListener("beforeunload", (event) => {
-      if (this.additions.size > 0) event.preventDefault();
+      if (this.hasUnsavedChanges) event.preventDefault();
     });
+
+    this.hub.on("additions:changed", () => {
+      this.dirty = true;
+      this.toolbar.setSaveEnabled(this.additions.size > 0);
+    });
+  }
+
+  private get hasUnsavedChanges(): boolean {
+    return this.dirty && this.additions.size > 0;
   }
 
   /** The currently open file, if any. */
@@ -101,10 +118,10 @@ export class App {
   }
 
   async openFile(file: File): Promise<void> {
-    if (this.current && this.additions.size > 0) {
+    if (this.current && this.hasUnsavedChanges) {
       const discard = await askConfirm(
         "Discard your changes?",
-        `Your drawings on "${this.current.name}" haven't been saved. Opening another file will discard them.`,
+        `Your changes to "${this.current.name}" haven't been saved. Opening another file will discard them.`,
         "Discard and open",
         "Keep editing",
       );
@@ -127,6 +144,7 @@ export class App {
       this.tools.deactivate();
       this.additions.clear();
       this.history.clear();
+      this.dirty = false;
       this.viewer.show(doc);
       this.startScreen.hidden = true;
       document.title = `${file.name} - Plain PDF`;
@@ -142,6 +160,55 @@ export class App {
       }
     } finally {
       if (ticket === this.openCounter) this.busy.hidden = true;
+    }
+  }
+
+  /**
+   * Saves a copy of the PDF with everything added locked into the pages.
+   * The original file is never changed.
+   */
+  async save(): Promise<void> {
+    const file = this.current;
+    if (!file || this.saving) return;
+    if (this.additions.size === 0) {
+      showToast("Nothing to save yet. Draw, highlight or sign first.");
+      return;
+    }
+    if (file.doc.encrypted) {
+      await showMessage(
+        "Can't save this file yet",
+        "This PDF is encrypted (password-protected), so Plain PDF can't save a copy with changes yet. Your changes are still here.",
+      );
+      return;
+    }
+    this.tools.deactivate();
+    // Ask where to save first, while the click still counts as the person's choice.
+    const target = await chooseSaveTarget(editedName(file.name));
+    if (!target) return;
+    this.saving = true;
+    this.busy.querySelector("p")!.textContent = "Saving a copy…";
+    this.busy.hidden = false;
+    try {
+      // The saving code (pdf-lib) is only loaded the first time you save.
+      const { saveWithAdditions } = await import("./save/save-pdf");
+      const bytes = await saveWithAdditions(file.bytes, this.additions.all(), file.doc.pageToPdf);
+      await target.write(bytes);
+      if (this.current === file) this.dirty = false;
+      showToast(
+        target.kind === "file" ? `Saved a copy: ${target.name}` : `Saved a copy to your Downloads: ${target.name}`,
+        5000,
+      );
+    } catch (error) {
+      console.error(error);
+      await showMessage(
+        "Couldn't save",
+        error instanceof Error && error.name === "EncryptedPdfError"
+          ? error.message
+          : "Something went wrong while saving. Your original file is unchanged, and your changes are still here.",
+      );
+    } finally {
+      this.saving = false;
+      this.busy.hidden = true;
     }
   }
 
@@ -192,6 +259,9 @@ export class App {
         event.preventDefault();
         if (key === "y" || event.shiftKey) this.history.redo();
         else this.history.undo();
+      } else if (key === "s") {
+        event.preventDefault();
+        void this.save();
       } else if (key === "o") {
         event.preventDefault();
         this.chooseFile();

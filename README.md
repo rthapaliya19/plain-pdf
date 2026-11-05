@@ -13,9 +13,9 @@ A private, offline PDF app for Windows, Android and macOS, with no clutter.
 | 0 | Project setup and privacy lock | Done |
 | 1 | Viewer: open, scroll, zoom, pinch, page number | Done |
 | 2 | Pen (black, blue, red), yellow highlighter that follows the text, eraser, undo/redo | Done |
-| 3 | Signature: draw once, remembered on the device, place and resize | Done, waiting for your testing |
-| 4 | Save a copy with additions locked into the page | Next |
-| 5 | Installable apps for Windows, Android and macOS, set as the default PDF app | Planned |
+| 3 | Signature and initials: draw once, remembered on the device, place and resize | Done, waiting for your testing |
+| 4 | Save a copy with additions locked into the page | Done, waiting for your testing |
+| 5 | Installable apps for Windows, Android and macOS, set as the default PDF app | Next |
 | Later | Text editing (fixing typos, rewriting sentences) and new ideas | Planned |
 
 The full plan is in [docs/PLAN.md](docs/PLAN.md).
@@ -25,9 +25,10 @@ The full plan is in [docs/PLAN.md](docs/PLAN.md).
 - **Open a PDF:** click **Open** (or press Ctrl+O, Cmd+O on Mac), or drag a PDF into the window.
 - **Zoom:** the minus and plus buttons, Ctrl and the mouse wheel, pinching on a trackpad or phone, or Ctrl+= and Ctrl+-. Ctrl+0 or clicking the percentage fits the page to the window.
 - **Go to a page:** type the page number in the box at the top right and press Enter.
-- **Draw:** click **Draw**, then pick black, blue or red, the yellow highlighter, a thickness, or the eraser. Click **Draw** again (or press Esc) to stop. On a phone, one finger draws and two fingers scroll and zoom.
+- **Draw:** click **Draw**, then pick black, blue or red (with a thickness), the yellow highlighter, or the eraser. Click **Done** (or press Esc) to go back to scrolling. On a phone, one finger draws and two fingers scroll and zoom.
 - **Highlighter:** drag over text and it snaps to the words and lines you cover, like selecting text. On scanned pages (which are pictures, with no text the app can read) it draws a straight line, level when you drag roughly level.
-- **Sign:** click **Sign**. The first time, draw your signature (it's saved only on this device). After that, Sign shows your saved signature: place it, draw a new one, or remove it. A placed signature appears in the middle of the page you're viewing: drag it to move, drag the round corner to resize, and tap × (or press Delete) to remove it.
+- **Sign:** click **Sign** to open the Sign panel with your **signature** and **initials**. The first time, tap "+ Add signature" or "+ Add initials" and draw them (they're saved only on this device). After that, tap one to place it, or use **Draw new** or **Remove**. A placed signature appears in the middle of the page you're viewing: drag it to move, drag the round corner to resize, and tap × (or press Delete) to remove it.
+- **Save:** click **Save** (or Ctrl+S, Cmd+S on Mac) to save a copy named "name-edited.pdf" with everything you added locked into the pages. The original file is never changed. In Chrome on a computer you choose where to save it; on phones it goes to Downloads. Encrypted (password-protected) PDFs can't be saved with changes yet.
 - **Undo / Redo:** the buttons, or Ctrl+Z and Ctrl+Y (Cmd+Z and Cmd+Shift+Z on Mac).
 
 ## For developers
@@ -60,6 +61,9 @@ src/
   tools/
     draw/              the Draw tool: pen, highlighter, eraser and its options strip
     sign/              signatures: the signature pad, saving it on the device, placing, moving and resizing
+  save/
+    save-pdf.ts        writes additions into a copy of the PDF (pdf-lib), exactly where they were drawn
+    save-file.ts       the "Save as" window, or Downloads where there isn't one
   ui/toast.ts          short messages near the bottom of the screen
   viewer/
     viewer.ts          page layout, drawing only the pages near the screen, zoom, page number
@@ -76,6 +80,7 @@ tests/
   e2e/viewer.test.cjs    browser tests (Playwright) for the viewer
   e2e/draw.test.cjs      browser tests for drawing, highlighting, erasing and undo
   e2e/sign.test.cjs      browser tests for signatures
+  e2e/save.test.cjs      browser tests for saving (also checks saved files with Python's pypdf)
   fixtures/              sample PDFs used by the tests
 ```
 
@@ -93,8 +98,9 @@ With `npm run preview` running in another terminal:
 node tests/e2e/viewer.test.cjs
 node tests/e2e/draw.test.cjs
 node tests/e2e/sign.test.cjs
+node tests/e2e/save.test.cjs   # needs: pip install pypdf
 ```
 
 ## License
 
-MIT. See [LICENSE](LICENSE). Uses [PDF.js](https://github.com/mozilla/pdf.js) (Apache 2.0).
+MIT. See [LICENSE](LICENSE). Uses [PDF.js](https://github.com/mozilla/pdf.js) (Apache 2.0) and [pdf-lib](https://github.com/Hopding/pdf-lib) (MIT).

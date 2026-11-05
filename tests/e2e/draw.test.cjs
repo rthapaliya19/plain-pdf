@@ -91,7 +91,6 @@ async function drag(page, from, to, steps = 12) {
 
   // Highlighter across a line of text (the 3rd text line is ~ 150+44 pt from the top).
   await page.click('button[aria-label="Yellow highlighter"]');
-  await page.click('button[aria-label="Medium line"]');
   const scale = b.w / 612;
   const lineY = b.y + (150 + 2 * 22 - 4) * scale;
   await drag(page, [b.x + 48 * scale, lineY], [b.x + 400 * scale, lineY], 20);
@@ -238,7 +237,7 @@ async function drag(page, from, to, steps = 12) {
   await page.waitForTimeout(200);
   check("Keep editing keeps file and drawings", (await page.textContent(".file-name")) === "sample-25-pages.pdf" && (await count(page, ".layer-ink path")) === 4);
 
-  // Remembered settings: the last choice was the black pen, medium
+  // Remembered settings: the last choice was the black pen; the last thickness picked was thin
   // Reloading with drawings triggers the browser's "leave site?" warning.
   await page.reload();
   check("browser warns before leaving with drawings", dialogs.includes("beforeunload"), dialogs.join(","));
@@ -246,7 +245,7 @@ async function drag(page, from, to, steps = 12) {
   await page.waitForSelector(".page-canvas");
   await page.click('button[aria-label="Draw"]');
   check("last pen settings remembered", (await page.getAttribute('button[aria-label="Black pen"]', "aria-pressed")) === "true" &&
-    (await page.getAttribute('button[aria-label="Medium line"]', "aria-pressed")) === "true");
+    (await page.getAttribute('button[aria-label="Thin line"]', "aria-pressed")) === "true");
 
   b = await pageBox(page, 1);
   await drag(page, [b.x + 100, b.y + 300], [b.x + 300, b.y + 320]);

@@ -147,6 +147,28 @@ input:focus-visible {
   background: var(--border);
 }
 
+.save-button {
+  margin-left: 4px;
+  padding: 0 12px 0 10px;
+  background: var(--accent);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.save-button:hover {
+  background: var(--accent-hover);
+}
+
+.save-button:active {
+  background: var(--accent-hover);
+}
+
+.save-button:disabled {
+  opacity: 1;
+  background: var(--pressed);
+  color: var(--muted);
+}
+
 .file-name {
   flex: 1;
   min-width: 0;
@@ -446,6 +468,29 @@ input:focus-visible {
   height: 16px;
 }
 
+.done-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 36px;
+  padding: 0 12px 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #ffffff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.done-button:hover {
+  background: var(--accent-hover);
+}
+
+.done-button svg {
+  width: 18px;
+  height: 18px;
+}
+
 .dot {
   display: block;
   border-radius: 50%;
@@ -689,6 +734,56 @@ input:focus-visible {
   border-color: var(--accent);
 }
 
+.signature-preview.empty {
+  border-style: dashed;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+}
+
+.sign-slots {
+  display: grid;
+  grid-template-columns: 3fr 2fr;
+  gap: 16px;
+}
+
+.sign-slot h3 {
+  margin: 0 0 6px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.sign-slot .signature-preview {
+  height: 120px;
+}
+
+.slot-links {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.link-button {
+  height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.link-button:hover {
+  background: var(--hover);
+}
+
+.link-button.danger-text {
+  color: #b91c1c;
+}
+
 .signature-preview svg {
   max-width: 100%;
   max-height: 100%;
@@ -760,6 +855,31 @@ input:focus-visible {
   }
 
   .tool-group .separator {
+    display: none;
+  }
+
+  /* Keep the word "Save" on phones: it's the most important button. */
+  .save-button .button-label {
+    display: inline;
+  }
+
+  .save-button {
+    padding: 0 10px;
+  }
+
+  .save-button svg {
+    display: none;
+  }
+
+  .sign-slots {
+    grid-template-columns: 1fr;
+  }
+
+  .done-button {
+    padding: 0 10px;
+  }
+
+  .done-button svg {
     display: none;
   }
 

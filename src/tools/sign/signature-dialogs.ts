@@ -1,12 +1,12 @@
 /**
- * The two signature pop-ups:
- *  - the signature pad, where you draw your signature once
- *  - "Your signature", shown when one is already saved: place it, draw a
- *    new one, or remove it from this device
+ * The signature pop-ups:
+ *  - the drawing pad, where you draw your signature or initials once
+ *  - the Sign panel, with two slots (Signature and Initials): tap one to
+ *    place it, draw a new one, or remove it from this device
  */
 import type { SignatureInk } from "../../core/additions";
 import { smoothPath } from "../../overlay/paths";
-import { SIGNATURE_COLOR } from "./signature-store";
+import { SIGNATURE_COLOR, type InkKind } from "./signature-store";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 /** Pen thickness on the pad, in screen pixels. */
@@ -64,26 +64,32 @@ function modal(className: string): HTMLDialogElement {
   return dialog;
 }
 
-/** Shows the signature pad. Resolves to the drawn signature, or null if cancelled. */
-export function drawSignature(): Promise<SignatureInk | null> {
+const WORDS: Record<InkKind, { title: string; hint: string; save: string; label: string }> = {
+  signature: { title: "Draw your signature", hint: "Sign above the line", save: "Save signature", label: "Signature" },
+  initials: { title: "Draw your initials", hint: "Write your initials above the line", save: "Save initials", label: "Initials" },
+};
+
+/** Shows the drawing pad. Resolves to the drawing, or null if cancelled. */
+export function drawInk(kind: InkKind): Promise<SignatureInk | null> {
+  const words = WORDS[kind];
   return new Promise((resolve) => {
     const dialog = modal("signature-dialog");
     const pad = el("div", "signature-pad");
     const line = el("div", "signature-line");
-    const hint = el("span", "signature-hint", "Sign above the line");
+    const hint = el("span", "signature-hint", words.hint);
     const svg = document.createElementNS(SVG_NS, "svg");
     pad.append(line, hint, svg);
 
     const clear = button("Clear", "button");
     const cancel = button("Cancel", "button");
-    const save = button("Save signature", "button primary");
+    const save = button(words.save, "button primary");
     save.disabled = true;
     clear.disabled = true;
     const actions = el("div", "dialog-actions");
     actions.append(clear, el("span", "spacer"), cancel, save);
 
     dialog.append(
-      el("h2", "", "Draw your signature"),
+      el("h2", "", words.title),
       el("p", "", "Use your finger, mouse or trackpad. It's saved only on this device."),
       pad,
       actions,
@@ -179,37 +185,55 @@ function normalise(strokes: number[][]): SignatureInk {
   };
 }
 
-export type SignMenuChoice = "place" | "redraw" | "remove" | null;
+export type SignPanelChoice = { kind: InkKind; action: "place" | "draw" | "remove" } | null;
 
-/** "Your signature": place the saved one, draw a new one, or remove it. */
-export function chooseSignatureAction(ink: SignatureInk): Promise<SignMenuChoice> {
+/**
+ * The Sign panel: a slot for your signature and one for your initials.
+ * Tap a saved one to place it; an empty slot opens the pad.
+ */
+export function chooseFromSignPanel(saved: Record<InkKind, SignatureInk | null>): Promise<SignPanelChoice> {
   return new Promise((resolve) => {
-    const dialog = modal("signature-dialog");
-    const preview = button("", "signature-preview");
-    preview.setAttribute("aria-label", "Place your signature on the page");
-    preview.title = "Place on the page";
-    preview.append(inkPicture(ink));
-
-    const remove = button("Remove", "button danger-text");
-    remove.title = "Remove your saved signature from this device";
-    const redraw = button("Draw new", "button");
-    const place = button("Place on page", "button primary");
-    const actions = el("div", "dialog-actions");
-    actions.append(remove, el("span", "spacer"), redraw, place);
-
-    dialog.append(el("h2", "", "Your signature"), el("p", "", "Saved only on this device."), preview, actions);
-
-    let choice: SignMenuChoice = null;
-    const pick = (c: SignMenuChoice) => () => {
-      choice = c;
+    const dialog = modal("signature-dialog sign-panel");
+    let choice: SignPanelChoice = null;
+    const pick = (kind: InkKind, action: "place" | "draw" | "remove") => () => {
+      choice = { kind, action };
       dialog.close();
     };
-    preview.addEventListener("click", pick("place"));
-    place.addEventListener("click", pick("place"));
-    redraw.addEventListener("click", pick("redraw"));
-    remove.addEventListener("click", pick("remove"));
+
+    const slots = el("div", "sign-slots");
+    for (const kind of ["signature", "initials"] as const) {
+      const ink = saved[kind];
+      const slot = el("section", `sign-slot sign-slot-${kind}`);
+      slot.append(el("h3", "", WORDS[kind].label));
+      if (ink) {
+        const preview = button("", "signature-preview");
+        preview.setAttribute("aria-label", `Place your ${kind} on the page`);
+        preview.title = "Tap to place it on the page";
+        preview.append(inkPicture(ink));
+        preview.addEventListener("click", pick(kind, "place"));
+        const redraw = button("Draw new", "link-button");
+        redraw.addEventListener("click", pick(kind, "draw"));
+        const remove = button("Remove", "link-button danger-text");
+        remove.title = `Remove your saved ${kind} from this device`;
+        remove.addEventListener("click", pick(kind, "remove"));
+        const links = el("div", "slot-links");
+        links.append(redraw, remove);
+        slot.append(preview, links);
+      } else {
+        const add = button(`+ Add ${kind === "signature" ? "signature" : "initials"}`, "signature-preview empty");
+        add.addEventListener("click", pick(kind, "draw"));
+        slot.append(add);
+      }
+      slots.append(slot);
+    }
+
+    dialog.append(
+      el("h2", "", "Sign"),
+      el("p", "", "Tap one to place it on the page. Saved only on this device."),
+      slots,
+    );
     dialog.addEventListener("close", () => resolve(choice));
     dialog.showModal();
-    place.focus();
+    (dialog.querySelector(".signature-preview") as HTMLElement | null)?.focus();
   });
 }

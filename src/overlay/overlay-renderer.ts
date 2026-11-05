@@ -218,14 +218,14 @@ function signatureBox(sig: PlacedSignature, page: { width: number; height: numbe
   const box = document.createElement("div");
   box.className = selected ? "sig-box selected" : "sig-box";
   box.dataset.id = sig.id;
-  box.setAttribute("aria-label", "Signature. Drag to move.");
+  box.setAttribute("aria-label", `${sig.role === "initials" ? "Initials" : "Signature"}. Drag to move.`);
   placeBox(box, sig, page);
 
   const remove = document.createElement("button");
   remove.type = "button";
   remove.className = "sig-delete";
-  remove.title = "Remove signature";
-  remove.setAttribute("aria-label", "Remove signature");
+  remove.title = sig.role === "initials" ? "Remove initials" : "Remove signature";
+  remove.setAttribute("aria-label", remove.title);
   remove.textContent = "×";
 
   const handle = document.createElement("div");

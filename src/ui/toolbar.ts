@@ -10,6 +10,7 @@ export interface ToolbarActions {
   open(): void;
   toggleDraw(): void;
   sign(): void;
+  save(): void;
   undo(): void;
   redo(): void;
   zoomIn(): void;
@@ -33,6 +34,7 @@ export class Toolbar {
   private readonly pageInput: HTMLInputElement;
   private readonly pageTotal: HTMLSpanElement;
   private readonly zoomLabel: HTMLButtonElement;
+  private readonly saveButton: HTMLButtonElement;
   private page = 1;
 
   constructor(hub: EventHub, actions: ToolbarActions) {
@@ -109,7 +111,13 @@ export class Toolbar {
     this.docControls.hidden = true;
     this.docControls.append(pageGroup, zoomGroup);
 
-    this.element.append(open, this.toolGroup, this.fileName, this.docControls);
+    this.saveButton = iconButton(icons.save, "Save", `Save a copy with your changes (${MOD}+S)`);
+    this.saveButton.classList.add("save-button");
+    this.saveButton.hidden = true;
+    this.saveButton.disabled = true;
+    this.saveButton.addEventListener("click", () => actions.save());
+
+    this.element.append(open, this.toolGroup, this.fileName, this.docControls, this.saveButton);
 
     hub.on("document:opened", ({ name, pageCount }) => {
       this.fileName.textContent = name;
@@ -118,12 +126,14 @@ export class Toolbar {
       this.pageInput.style.width = `${String(pageCount).length + 1.5}ch`;
       this.docControls.hidden = false;
       this.toolGroup.hidden = false;
+      this.saveButton.hidden = false;
       document.body.classList.add("has-document");
     });
     hub.on("document:closed", () => {
       this.fileName.textContent = "";
       this.docControls.hidden = true;
       this.toolGroup.hidden = true;
+      this.saveButton.hidden = true;
       document.body.classList.remove("has-document");
     });
     hub.on("page:changed", ({ page }) => {
@@ -140,6 +150,11 @@ export class Toolbar {
     hub.on("tool:changed", ({ id }) => {
       this.drawButton.setAttribute("aria-pressed", String(id === "draw"));
     });
+  }
+
+  /** Save is available once something has been added. */
+  setSaveEnabled(enabled: boolean): void {
+    this.saveButton.disabled = !enabled;
   }
 }
 

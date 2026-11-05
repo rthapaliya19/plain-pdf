@@ -46,10 +46,21 @@ export interface RenderJob {
   cancel(): void;
 }
 
+/** A 2D transform [a, b, c, d, e, f], as used in PDF files. */
+export type Matrix = [number, number, number, number, number, number];
+
 export interface PdfDocument {
   readonly pageCount: number;
   /** Page sizes, in order. Index 0 is page 1. */
   readonly pageSizes: readonly PageSize[];
+  /** True if the file is encrypted (for example password-protected). */
+  readonly encrypted: boolean;
+  /**
+   * For each page, the transform from the app's page coordinates (points,
+   * top-left origin, rotation applied) to the PDF file's own coordinates.
+   * Used when saving, so additions land exactly where they were drawn.
+   */
+  readonly pageToPdf: readonly Matrix[];
   /** Draws page `index` (0-based) onto `canvas`, `pixelsPerPoint` pixels per PDF point. */
   renderPage(index: number, canvas: HTMLCanvasElement, pixelsPerPoint: number): RenderJob;
   /** Where the text on page `index` (0-based) sits. Used to make highlights follow the text. */
@@ -121,16 +132,22 @@ export async function openPdf(bytes: Uint8Array, askPassword: PasswordPrompt): P
 
   const pages: PDFPageProxy[] = [];
   const pageSizes: PageSize[] = [];
+  const pageToPdf: Matrix[] = [];
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i);
     const viewport = page.getViewport({ scale: 1 });
     pages.push(page);
     pageSizes.push({ width: viewport.width, height: viewport.height });
+    pageToPdf.push(Util.inverseTransform(viewport.transform) as Matrix);
   }
+  const { info } = await doc.getMetadata().catch(() => ({ info: {} }));
+  const encrypted = Boolean((info as { EncryptFilterName?: string | null }).EncryptFilterName);
 
   return {
     pageCount: doc.numPages,
     pageSizes,
+    encrypted,
+    pageToPdf,
     renderPage(index, canvas, pixelsPerPoint) {
       const page = pages[index];
       const viewport = page.getViewport({ scale: pixelsPerPoint });

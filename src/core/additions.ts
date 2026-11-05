@@ -47,9 +47,10 @@ export interface SignatureInk {
   color: string;
 }
 
-/** A signature placed on a page. */
+/** A signature (or initials) placed on a page. */
 export interface PlacedSignature extends Base {
   kind: "signature";
+  role: "signature" | "initials";
   x: number;
   y: number;
   width: number;

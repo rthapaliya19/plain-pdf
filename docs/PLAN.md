@@ -19,10 +19,12 @@
 | Feature | Details |
 |---|---|
 | Open and view | Open button, drag and drop on computers, scroll, zoom, pinch to zoom, page number |
-| Pen | Black, blue, red, 3 thicknesses |
-| Highlighter | Yellow and see-through, so text stays readable. Snaps to the words and lines of text you drag over; straight (level-snapping) lines on scans |
+| Pen | Black, blue, red, 3 thicknesses (thickness is shown for the pen only) |
+| Highlighter | Yellow and see-through, so text stays readable. Snaps to the words and lines of text you drag over; straight (level-snapping) lines of one fixed thickness on scans. No thickness choice |
+| Done | A Done button in the drawing strip returns to normal scrolling mode |
 | Eraser | Removes whole strokes. Only erases what was added, never the original PDF |
 | Undo / Redo | For everything added |
+| Initials | Like the signature, saved separately; start at a third of the signature's width. Both live in one Sign panel |
 | Signature | Blue ink. Draw once with finger, mouse or trackpad. Remembered on the device. Appears in the middle of the visible page; drag to move, drag the corner to resize, × to remove. Redraw or remove the saved one anytime. No PIN, no date |
 | Save | Always saves a copy, named "name-edited.pdf" by default, using a Save dialog where possible. Additions are locked into the page. The original is untouched |
 
@@ -56,7 +58,7 @@ Each phase ends with a check-in: the owner tests and approves before the next ph
 | 4. Save | Save a copy with additions locked in | Check saved copies in another viewer |
 | Feedback | | New ideas before packaging |
 | 5. Package | Windows, Android and macOS apps, default PDF app setup | Install and set as default |
-| Later | Text editing (typos and sentences; scans need cover-and-retype), new ideas | |
+| Later | Text editing (typos and sentences; scans need cover-and-retype), saving encrypted PDFs, new ideas | |
 
 ## Decisions log
 
@@ -69,3 +71,6 @@ Each phase ends with a check-in: the owner tests and approves before the next ph
 - "Fit" zoom fits the page being read, capped at 125% on wide screens.
 - Highlighter follows the text (owner's first choice); straight lines where there is no readable text.
 - Signature: blue ink, one saved signature, appears in the middle of the visible page, drag to move, corner to resize, × to remove, no date. The eraser doesn't remove signatures.
+- Initials added, in the same Sign panel as the signature (one Sign button keeps the toolbar uncluttered).
+- Highlighter thickness removed; a Done button exits drawing.
+- Saving writes additions into the page content (locked in), keeps the file's metadata as it was, and never changes the original. Encrypted PDFs can't be saved with changes yet (added to the later list).

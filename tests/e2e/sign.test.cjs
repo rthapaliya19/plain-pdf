@@ -66,8 +66,11 @@ async function signWithMouse(page) {
 
   check("Sign button shown", await page.isVisible('button[aria-label="Sign"]'));
   await page.click('button[aria-label="Sign"]');
+  await page.waitForSelector("dialog.sign-panel[open]");
+  check("first time: Sign panel offers to add a signature", await page.isVisible("dialog[open] >> text=+ Add signature"));
+  await page.click("dialog[open] >> text=+ Add signature");
   await page.waitForSelector("dialog[open] .signature-pad");
-  check("first time: signature pad opens", (await page.textContent("dialog[open] h2")) === "Draw your signature");
+  check("...which opens the pad", (await page.textContent("dialog[open] h2")) === "Draw your signature");
   check("Save starts disabled", await page.isDisabled("dialog >> text=Save signature"));
   await signWithMouse(page);
   check("drawing enables Save", !(await page.isDisabled("dialog >> text=Save signature")));
@@ -152,14 +155,14 @@ async function signWithMouse(page) {
 
   // Second time: the saved signature is offered
   await page.click('button[aria-label="Sign"]');
-  await page.waitForSelector("dialog[open] .signature-preview");
-  check("next time: shows your saved signature", (await page.textContent("dialog[open] h2")) === "Your signature");
+  await page.waitForSelector("dialog[open] .sign-slot-signature svg");
+  check("next time: the Sign panel shows your saved signature", (await page.textContent("dialog[open] h2")) === "Sign");
   await page.screenshot({ path: `${SHOTS}/p3-d4-menu.png` });
-  await page.click("dialog >> text=Place on page");
+  await page.click('dialog[open] [aria-label="Place your signature on the page"]');
   await page.waitForFunction(() => document.querySelectorAll(".sig-box").length === 2, null, { timeout: 2000 }).catch(() => {});
   check("Place on page adds another signature", (await count(page, ".sig-box")) === 2);
   await page.click('button[aria-label="Sign"]');
-  await page.click("dialog >> text=Place on page");
+  await page.click('dialog[open] [aria-label="Place your signature on the page"]');
   await page.waitForFunction(() => document.querySelectorAll(".sig-box").length === 3, null, { timeout: 2000 }).catch(() => {});
   const spots = await page.$$eval(".sig-box", (bs) => bs.map((b) => b.style.left + "," + b.style.top));
   check("a signature placed in the same view doesn't land exactly on top of another", new Set(spots).size === spots.length, spots.join(" | "));
@@ -170,10 +173,10 @@ async function signWithMouse(page) {
   await page.setInputFiles("input[type=file]", pdf("sample-25-pages.pdf"));
   await page.waitForSelector(".page-canvas");
   await page.click('button[aria-label="Sign"]');
-  await page.waitForSelector("dialog[open] .signature-preview");
+  await page.waitForSelector("dialog[open] .sign-slot-signature svg");
   check("signature remembered after reload", true);
   // Draw a new one
-  await page.click("dialog >> text=Draw new");
+  await page.click("dialog[open] .sign-slot-signature >> text=Draw new");
   await page.waitForSelector("dialog[open] .signature-pad");
   const oldSaved = await page.evaluate(() => localStorage.getItem("plain-pdf:signature"));
   await signWithMouse(page);
@@ -187,22 +190,26 @@ async function signWithMouse(page) {
 
   // Remove from this device
   await page.click('button[aria-label="Sign"]');
-  await page.waitForSelector("dialog[open] .signature-preview");
-  await page.click("dialog >> text=Remove");
+  await page.waitForSelector("dialog[open] .sign-slot-signature svg");
+  await page.click("dialog[open] .sign-slot-signature >> text=Remove");
   await page.waitForSelector("dialog[open] >> text=Remove your saved signature?");
-  await page.click("dialog[open] >> text=Keep it");
-  check("Keep it keeps the saved signature", await page.evaluate(() => !!localStorage.getItem("plain-pdf:signature")));
+  await page.click("dialog[open] >> button:text-is('Keep')");
+  check("Keep keeps the saved signature", await page.evaluate(() => !!localStorage.getItem("plain-pdf:signature")));
   await page.click('button[aria-label="Sign"]');
-  await page.click("dialog >> text=Remove");
+  await page.click("dialog[open] .sign-slot-signature >> text=Remove");
   await page.click("dialog[open] >> button:text-is('Remove')");
   await page.waitForTimeout(200);
   check("Remove deletes it from this device", await page.evaluate(() => !localStorage.getItem("plain-pdf:signature")));
   check("placed signatures stay after removing the saved one", (await count(page, ".sig-box")) === 1);
   await page.click('button[aria-label="Sign"]');
-  await page.waitForSelector("dialog[open] .signature-pad");
-  check("after removing, Sign asks you to draw again", (await page.textContent("dialog[open] h2")) === "Draw your signature");
-  await page.click("dialog >> text=Cancel");
-  check("Cancel adds nothing", (await count(page, ".sig-box")) === 1);
+  await page.waitForSelector("dialog.sign-panel[open]");
+  check("after removing, the panel offers to add a signature again", await page.isVisible("dialog[open] >> text=+ Add signature"));
+  await page.click("dialog[open] .dialog-close");
+  check("closing the panel adds nothing", (await count(page, ".sig-box")) === 1);
+  await page.click('button[aria-label="Sign"]');
+  await page.click("dialog[open] >> text=+ Add signature");
+  await page.click("dialog[open] >> text=Cancel");
+  check("cancelling the pad adds nothing", (await count(page, ".sig-box")) === 1);
 
   check("desktop: no privacy-lock violations", (await page.evaluate(() => window.__csp)).length === 0);
   check("desktop: no errors or warnings", problems.length === 0, problems.join(" | "));
@@ -225,6 +232,8 @@ async function signWithMouse(page) {
   const scrollTop = () => m.$eval(".viewer", (v) => v.scrollTop);
 
   await m.tap('button[aria-label="Sign"]');
+  await m.waitForSelector("dialog.sign-panel[open]");
+  await m.tap("dialog[open] >> text=+ Add signature");
   await m.waitForSelector("dialog[open] .signature-pad");
   const mpad = await box(m, ".signature-pad");
   const vw = await m.evaluate(() => innerWidth);
