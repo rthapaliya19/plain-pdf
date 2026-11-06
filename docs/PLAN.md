@@ -133,6 +133,6 @@ Decisions:
 - Test first: an Android-only pre-release (push to the `android-test` branch), then 1.2.0 for all three after the owner approves. Computers can skip 1.2.0 (no change there).
 
 - [x] 1.2: built and tested in the browser (29 checks; 371 in all)
-- [ ] 1.2: Android test build published
+- [x] 1.2: Android test build published (v1.2.0-test.7)
 - [ ] 1.2: owner tests printing on the Pixel
 - [ ] 1.2: release 1.2.0 apps
