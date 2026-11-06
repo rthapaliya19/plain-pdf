@@ -601,9 +601,9 @@ async function paintImage(doc: PDFDocument, image: PDFStream, ctm: M, areas: Are
     canvas.height = bitmap.height;
     const g = canvas.getContext("2d")!;
     g.drawImage(bitmap, 0, 0);
-    bitmap.close();
     const sx = bitmap.width / width;
     const sy = bitmap.height / height;
+    bitmap.close();
     for (const { box, color } of boxes) {
       g.fillStyle = `rgb(${color.map((x) => Math.round(255 * x)).join(",")})`;
       g.fillRect(box.c0 * sx, box.r0 * sy, (box.c1 - box.c0) * sx, (box.r1 - box.r0) * sy);
@@ -686,9 +686,11 @@ export async function redactPage(doc: PDFDocument, page: PDFPage, areas: Area[])
     const parts: Uint8Array[] = [];
     for (const s of streams) if (s instanceof PDFStream) parts.push(streamBytes(s), Uint8Array.of(10));
     const content = concat(parts);
-    const resources = page.node.Resources() ?? (ctx.obj({}) as PDFDict);
+    // This page's own copy of its resource lists (they may be shared with other pages).
+    const resources = privateResources(doc, page.node.Resources());
+    page.node.set(PDFName.of("Resources"), resources);
     const counter = { n: 0 };
-    const result = await redactContent(doc, content, resources, IDENTITY, areas, counter, 0);
+    const result = await redactContent(doc, content, resources, initialState(), areas, counter, 0);
     // Even unchanged content is rewritten as one stream, so the page's drawing instructions are a fresh copy.
     const ref = ctx.register(ctx.flateStream(result));
     page.node.set(PDFName.of("Contents"), ctx.obj([ref]));
@@ -724,11 +726,55 @@ function freshName(resources: PDFDict, category: string, counter: { n: number },
   return name;
 }
 
+function initialState(): GState {
+  return { ctm: IDENTITY, font: null, size: 0, charSpace: 0, wordSpace: 0, scale: 1, leading: 0, rise: 0, render: 0 };
+}
+
+/**
+ * A copy of a resources dictionary whose picture/drawing list (XObject) and
+ * marked-content list (Properties) are copies too, so they can be changed
+ * without affecting anything else that shares them.
+ */
+function privateResources(doc: PDFDocument, resources: PDFDict | undefined): PDFDict {
+  const ctx = doc.context;
+  const copy = ctx.obj({}) as PDFDict;
+  if (!resources) return copy;
+  for (const [k, v] of resources.entries()) copy.set(k, v);
+  for (const key of ["XObject", "Properties"]) {
+    const sub = resources.lookup(PDFName.of(key));
+    if (sub instanceof PDFDict) {
+      const subCopy = ctx.obj({}) as PDFDict;
+      for (const [k, v] of sub.entries()) subCopy.set(k, v);
+      copy.set(PDFName.of(key), subCopy);
+    }
+  }
+  const props = copy.lookup(PDFName.of("Properties"));
+  if (props instanceof PDFDict) {
+    // Marked-content details are edited (hidden text dropped), so copy each one too.
+    for (const [k, v] of props.entries()) {
+      const d = ctx.lookup(v);
+      if (d instanceof PDFDict) {
+        const dc = ctx.obj({}) as PDFDict;
+        for (const [kk, vv] of d.entries()) dc.set(kk, vv);
+        props.set(k, dc);
+      }
+    }
+  }
+  return copy;
+}
+
+/** Names of pictures and drawings that some "Do" in the content uses. */
+function usedXObjects(content: Uint8Array): Set<string> {
+  const used = new Set<string>();
+  for (const o of parseContent(content)) if (o.op === "Do" && isName(o.args[0])) used.add(o.args[0].name);
+  return used;
+}
+
 async function redactContent(
   doc: PDFDocument,
   content: Uint8Array,
   resources: PDFDict,
-  startCtm: M,
+  startState: GState,
   areas: Area[],
   counter: { n: number },
   depth: number,
@@ -747,7 +793,9 @@ async function redactContent(
     }
     return fonts.get(name)!;
   };
-  let gs: GState = { ctm: startCtm, font: null, size: 0, charSpace: 0, wordSpace: 0, scale: 1, leading: 0, rise: 0, render: 0 };
+  // A drawing inside the page starts from the page's state at that point (including text settings).
+  let gs: GState = { ...startState };
+  const replacedNames = new Set<string>();
   const stack: GState[] = [];
   let tm: M = IDENTITY;
   let tlm: M = IDENTITY;
@@ -948,6 +996,7 @@ async function redactContent(
           if (!copy) break;
           const name = freshName(resources, "XObject", counter, ctx);
           (resources.lookup(PDFName.of("XObject")) as PDFDict).set(PDFName.of(name), copy);
+          replacedNames.add(a[0].name);
           replacements.push({ start: o.start, end: o.end, text: ` ${writeName(name)} Do ` });
         } else if (sub === "Form") {
           const fm = x.dict.lookup(PDFName.of("Matrix"));
@@ -960,16 +1009,16 @@ async function redactContent(
             if (!areas.some((area) => touches(box, area))) break;
           }
           const formRes = x.dict.lookup(PDFName.of("Resources"));
-          const inner = formRes instanceof PDFDict ? formRes : resources;
+          const inner = privateResources(doc, formRes instanceof PDFDict ? formRes : resources);
           const before = streamBytes(x);
-          const after = await redactContent(doc, before, inner, ctm, areas, counter, depth + 1);
+          const after = await redactContent(doc, before, inner, { ...gs, ctm }, areas, counter, depth + 1);
           if (sameBytes(before, after)) break;
-          const d = ctx.obj({}) as PDFDict;
-          for (const [k, v] of x.dict.entries()) if (!["Length", "Filter", "DecodeParms"].includes(k.decodeText())) d.set(k, v);
           const copy = ctx.flateStream(after);
-          for (const [k, v] of d.entries()) copy.dict.set(k, v);
+          for (const [k, v] of x.dict.entries()) if (!["Length", "Filter", "DecodeParms", "Resources"].includes(k.decodeText())) copy.dict.set(k, v);
+          copy.dict.set(PDFName.of("Resources"), inner);
           const name = freshName(resources, "XObject", counter, ctx);
           (resources.lookup(PDFName.of("XObject")) as PDFDict).set(PDFName.of(name), ctx.register(copy));
+          replacedNames.add(a[0].name);
           replacements.push({ start: o.start, end: o.end, text: ` ${writeName(name)} Do ` });
         }
         break;
@@ -1008,7 +1057,15 @@ async function redactContent(
     at = r.end;
   }
   parts.push(content.subarray(at));
-  return concat(parts);
+  const result = concat(parts);
+  // Originals that were replaced by painted or cleaned copies are dropped from this
+  // (private) list, so they're no longer part of the page and get cleared out of the file.
+  if (replacedNames.size > 0) {
+    const used = usedXObjects(result);
+    const list = resources.lookup(PDFName.of("XObject"));
+    if (list instanceof PDFDict) for (const name of replacedNames) if (!used.has(name)) list.delete(PDFName.of(name));
+  }
+  return result;
 }
 
 function sameBytes(a: Uint8Array, b: Uint8Array): boolean {

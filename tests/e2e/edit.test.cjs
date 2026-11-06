@@ -68,7 +68,7 @@ const hexToRgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
   check("tapping a line opens it for editing", (await page.inputValue(".edit-editor")) === original, await page.inputValue(".edit-editor"));
   const style = await page.$eval(".edit-editor", (t) => [getComputedStyle(t).fontFamily, getComputedStyle(t).fontWeight, getComputedStyle(t).backgroundColor]);
   check("editor matches the text's look (plain font, regular)", style[0].startsWith("Arimo") && style[1] === "400", style.join(" | "));
-  check("first time: explains the old words stay in the file", (await page.textContent(".toast"))?.includes("still in the file"));
+  check("first time: explains the old words are removed when saving", (await page.textContent(".toast"))?.includes("removed from it for good"));
   await page.screenshot({ path: `${SHOTS}/e-d1-editing.png`, clip: { x: pg.x, y: at(0, baselineOf(1))[1], width: 820, height: 90 } });
   await page.keyboard.press("Control+a");
   await page.keyboard.type(original.replace("lazy", "sleepy"));
@@ -130,6 +130,14 @@ const hexToRgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
   writeFileSync(file, Buffer.from(await page.evaluate(() => window.__saves[0].bytes)));
   const text = pypdf("print(r.pages[0].extract_text().replace(chr(10), ' '))", file);
   check("saved copy contains the new words as real text", text.includes("sleepy dog") && text.includes("this sentence is new"));
+  // The old words are gone from the copy: the edited line reads only the new wording, at the same height.
+  const lineWords = (f) => {
+    const html = execFileSync("pdftotext", ["-f", "1", "-l", "1", "-bbox", f, "-"]).toString();
+    return [...html.matchAll(/<word xMin="[\d.]+" yMin="([\d.]+)" xMax="[\d.]+" yMax="([\d.]+)">([^<]*)<\/word>/g)].map((m) => ({ y: (+m[1] + +m[2]) / 2, text: m[3] }));
+  };
+  // (The first edit was on the third body line, baseline 194.)
+  const line1 = lineWords(file).filter((x) => Math.abs(x.y - (baselineOf(2) - 3)) < 3).map((x) => x.text).join(" ");
+  check("the edited line's old words are removed from the saved file", line1.includes("sleepy") && !line1.includes("lazy"), line1);
   await page.setInputFiles("input[type=file]", file);
   await page.waitForFunction(() => document.querySelector(".file-name")?.textContent === "saved-edits.pdf");
   await page.waitForSelector(".page-canvas");

@@ -151,7 +151,7 @@ Built in this order, each tried by the owner in the web preview, then one 1.3.0 
 - [x] 1.3: chapter list (43 checks; 414 in all)
 - [x] 1.3: sharper printing on computers (300 dpi; Mac print permission added; owner to try Mac printing in 1.3.0)
 - [x] 1.3: saving password-protected PDFs (qpdf 0.3.0 build; keeps the exact lock incl. owner password; Android prints an unlocked temporary copy; 34 checks; 453 in all)
-- [ ] 1.3: redaction
+- [x] 1.3: redaction (64 checks; edits also remove old words; 518 checks in all)
   - Redact is in the More menu (owner's choice). Drag a box; a solid black box shows it; select it to move, resize or remove (×); undo works.
   - On save (src/save/redact.ts), before additions are drawn: for every redaction box and every text-edit patch, in PDF coordinates:
     text glyphs touching the box are removed from the page's content (the rest of the line keeps its place); pictures under it get those pixels

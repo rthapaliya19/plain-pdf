@@ -18,7 +18,7 @@ A private, offline PDF app for Windows, Android and macOS, with no clutter.
 | 5 | Installable apps for Windows, Android and macOS, set as the default PDF app | Done |
 | 1.1 | Edit the PDF's own text: fix typos, rewrite sentences, cover and retype on scans | Done (version 1.1.0) |
 | 1.2 | Printing in the Android app | Done (version 1.2.0) |
-| 1.3 | Chapter list, sharper printing on computers, saving password-protected PDFs, redaction | In progress |
+| 1.3 | Chapter list, sharper printing on computers, saving password-protected PDFs, redaction | Built, waiting for your testing |
 | Later | New ideas | Planned |
 
 The full plan is in [docs/PLAN.md](docs/PLAN.md).
@@ -62,13 +62,14 @@ When there's a new version, download and install it the same way, over the old o
 - **Draw:** click **Draw**, then pick black, blue or red (with a thickness), the yellow highlighter, or the eraser. Click **Done** (or press Esc) to go back to scrolling. On a phone, one finger draws and two fingers scroll and zoom.
 - **Highlighter:** drag over text and it snaps to the words and lines you cover, like selecting text. On scanned pages (which are pictures, with no text the app can read) it draws a straight line, level when you drag roughly level.
 - **Text:** click **Text**, then tap anywhere on a page and type. Pick a size (small, medium, large) and black, blue or red. Tap elsewhere, **Done** or Esc to finish. Tap text to edit it; drag it to move it. Outside the Text tool, click text to select it (× removes it) and double-click (or tap it again) to edit.
-- **Edit the PDF's own text:** with **Text** on, tap a line of the PDF's text to change it, or drag down across several lines to rewrite them as one paragraph (it rewraps to the original width). The old words are covered by a patch in the paper's colour and the new words are written in a matching style (plain, serif or typewriter; bold or italic; same size and colour). If the new wording needs more room, an orange outline and **Shrink to fit** appear. On scans (pictures of text), drag a box over the words, then type the replacement. Tap an edit to change it again; outside the Text tool, select it and tap × to undo it. Note: the old words stay in the file underneath, so search or copy in other apps can still find them. In the Text tool on a phone, one finger taps and drags; two fingers scroll and zoom.
+- **Edit the PDF's own text:** with **Text** on, tap a line of the PDF's text to change it, or drag down across several lines to rewrite them as one paragraph (it rewraps to the original width). The old words are covered by a patch in the paper's colour and the new words are written in a matching style (plain, serif or typewriter; bold or italic; same size and colour). If the new wording needs more room, an orange outline and **Shrink to fit** appear. On scans (pictures of text), drag a box over the words, then type the replacement. Tap an edit to change it again; outside the Text tool, select it and tap × to undo it. When you save a copy, the old words under the patch are removed from it for good. In the Text tool on a phone, one finger taps and drags; two fingers scroll and zoom.
 - **Forms:** fillable boxes, checkboxes, radio buttons and dropdowns just work: click and type. When you save, the answers are locked into the copy. Old Adobe "XFA" forms can't be filled.
 - **Links:** links inside the PDF jump to their page; web links ask before opening in your browser.
 - **Select and copy:** drag across text (or long-press on a phone) and copy it. Scanned pages have no text to select.
 - **Search:** click the magnifying glass (or Ctrl+F, Cmd+F on Mac). Matches are highlighted; Enter and Shift+Enter go to the next and previous match; Esc closes.
 - **Print:** in the **⋯ More** menu (or Ctrl+P, Cmd+P). Prints what a saved copy would contain, including your drawings, text, signatures and form answers. On computers, pages print at 300 dots per inch. On Android, it opens Android's own print screen: choose your printer (or **Save as PDF**), copies and pages there.
 - **Organize pages:** in the **⋯ More** menu. A grid of page previews: tap pages to select them (Shift-click for a range), then **Rotate left/right**, **Delete**, or **Save as new PDF** (just the selected pages). Drag pages to reorder them; on a phone, press and hold a page, then drag. Drawings, text and signatures stay with their page and turn with it. Everything can be undone.
+- **Redact (remove for good):** in the **⋯ More** menu. Drag a box over anything you want removed: words, pictures, part of a scan. It shows as a black box; tap it to move it, drag the round corner to resize it, or tap × to remove it. When you save a copy, everything under the black boxes is removed from the file for good (including hidden copies of the words), and the rest of the page stays as it was. Rarely, a page has something that can't be removed piece by piece (an unusual font or picture format); that page is then saved as a picture, and the app says so. The original file isn't changed.
 - **Add pages from another PDF:** in the **⋯ More** menu or the Organize screen. Adds all pages of one or more files to the end. Save then makes one combined file. (Fillable form fields are locked into the pages when pages are reorganized or combined.)
 - **Sign:** click **Sign** to open the Sign panel with your **signature** and **initials**. The first time, tap "+ Add signature" or "+ Add initials" and draw them (they're saved only on this device). After that, tap one to place it, or use **Draw new** or **Remove**. A placed signature appears in the middle of the page you're viewing: drag it to move, drag the round corner to resize, and tap × (or press Delete) to remove it.
 - **Save:** click **Save** (or Ctrl+S, Cmd+S on Mac) to save a copy named "name-edited.pdf" with everything you added locked into the pages. The original file is never changed. In Chrome on a computer you choose where to save it; on phones it goes to Downloads.
@@ -112,12 +113,14 @@ src/
     search/            the search bar and the page text index
     print/             printing (pages drawn as pictures, then the print window)
     organize/          the Organize pages screen (select, rotate, delete, drag to reorder)
+    redact/            the Redact tool (black boxes)
   ui/menu.ts           the More menu
   ui/contents-panel.ts the chapter list (the PDF's own table of contents)
   vendor/              form-field styles copied from PDF.js (Apache 2.0)
   save/
     save-pdf.ts        writes additions into a copy of the PDF (pdf-lib), exactly where they were drawn
     protection.ts      unlocks password-protected PDFs for saving, and locks the copy the same way (qpdf)
+    redact.ts          removes what's under redaction boxes and edit patches: letters, picture pixels, shapes, links
     save-file.ts       the "Save as" window, or Downloads where there isn't one
   ui/toast.ts          short messages near the bottom of the screen
   viewer/
@@ -142,9 +145,10 @@ tests/
   e2e/roundc.test.cjs    browser tests for organizing, merging and splitting
   e2e/edit.test.cjs      browser tests for editing the PDF's own text
   e2e/contents.test.cjs  browser tests for the chapter list
+  e2e/redact.test.cjs    browser tests for redaction (also checks saved files with pypdf, pdftotext and Pillow)
   e2e/protected.test.cjs browser tests for saving and printing password-protected PDFs
   e2e/android-print.test.cjs  browser tests for printing in the Android app (with a stand-in for Android's print screen)
-  fixtures/              sample PDFs used by the tests
+  fixtures/              sample PDFs used by the tests (make-redact-test.cjs makes redact-test.pdf)
 ```
 
 Each page in the viewer has an overlay layer on top of the PDF drawing. The pen, highlighter and (later) signature tools draw into that layer, so they never change the original file. Additions are only written into a new copy when saving.
@@ -176,6 +180,7 @@ node tests/e2e/roundb.test.cjs
 node tests/e2e/roundc.test.cjs
 node tests/e2e/edit.test.cjs
 node tests/e2e/contents.test.cjs
+node tests/e2e/redact.test.cjs           # needs pypdf, Pillow and poppler (pdftotext, pdftoppm)
 node tests/e2e/protected.test.cjs        # needs pypdf and pdftoppm (poppler)
 node tests/e2e/android-print.test.cjs   # needs pypdf and pdftoppm (poppler)
 ```
