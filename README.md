@@ -140,6 +140,8 @@ Each page in the viewer has an overlay layer on top of the PDF drawing. The pen,
 
 The same web app runs inside small native apps built with [Tauri 2](https://tauri.app) (`src-tauri/`). The native part only opens the window and receives PDFs the system asks it to open; `src/platform/native.ts` uses the system's Open and Save windows. Android extras are in `android/MainActivity.kt` and `scripts/android-setup.mjs`.
 
+The Android app is signed with a key kept in the repository's Actions secrets `ANDROID_KEYSTORE_BASE64` (the key file, base64) and `ANDROID_KEYSTORE_PASSWORD`, so updates install over earlier versions. Keep a private backup of both.
+
 Pushing to the `release` branch runs `.github/workflows/apps.yml`, which builds the Windows installer, the Mac app (Apple chips and Intel) and the Android app, and publishes them as a release named after the version in `src-tauri/tauri.conf.json`. To build locally: `npx tauri build` (needs Rust).
 
 ### Privacy lock

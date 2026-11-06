@@ -93,9 +93,11 @@ jobs:
           VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "Signing with the saved key (ANDROID_KEYSTORE_BASE64)."
             echo "$KEYSTORE_BASE64" | base64 --decode > release.jks
             PASSWORD="$KEYSTORE_PASSWORD"
           else
+            echo "No saved key found: signing with a one-off key."
             # No saved key yet: sign with a one-off key. (Updates then need
             # the old app removed first; saving a key as a secret avoids that.)
             PASSWORD=$(openssl rand -hex 16)
@@ -107,7 +109,8 @@ jobs:
           "$TOOLS/zipalign" -f -p 4 "$UNSIGNED" aligned.apk
           "$TOOLS/apksigner" sign --ks release.jks --ks-pass "pass:$PASSWORD" --ks-key-alias plainpdf \
             --out "Plain.PDF_${VERSION}_android.apk" aligned.apk
-          "$TOOLS/apksigner" verify "Plain.PDF_${VERSION}_android.apk"
+          # Shows the key's public fingerprint (safe to share), to confirm which key signed the app.
+          "$TOOLS/apksigner" verify --print-certs "Plain.PDF_${VERSION}_android.apk" | grep -i "SHA-256"
           rm release.jks
       - uses: softprops/action-gh-release@v3
         with:
