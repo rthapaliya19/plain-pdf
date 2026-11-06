@@ -122,3 +122,4 @@ Decisions:
 - [x] 1.1: editing built and tested (25 checks; 342 in all)
 - [x] 1.1: owner tested the preview; works well (2026-11-06)
 - [x] 1.1: 1.1.0 apps released for Windows, Mac and Android (2026-11-06)
+- [x] 1.1: owner installed 1.1.0 on Windows, Pixel and Mac; everything works (2026-11-06)
