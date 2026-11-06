@@ -124,7 +124,7 @@ const imagePixels = (page, src, frac) => page.evaluate(async ({ src, frac }) => 
   await page.waitForFunction(() => window.__prints.length === 1, null, { timeout: 60000 });
   const printed = await page.evaluate(() => window.__prints[0]);
   check("print prepares every page", printed.length === 25, `${printed.length} pages`);
-  check("printed pages are sharp (about 150 dots per inch)", printed[0].w >= 1200 && printed[0].w <= 1300, `${printed[0].w}x${printed[0].h}`);
+  check("printed pages are sharp (300 dots per inch)", printed[0].w === 2550 && printed[0].h === 3300, `${printed[0].w}x${printed[0].h}`);
   check("landscape pages print landscape", printed[2].landscape && !printed[0].landscape);
   const red = await imagePixels(page, printed[0].src, { x0: 530 / 612, y0: 200 / 792, x1: 550 / 612, y1: 400 / 792 });
   check("your drawing is in the printout, in the right place", red > 200, `${red} red pixels`);

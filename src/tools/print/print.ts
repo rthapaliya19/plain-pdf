@@ -1,6 +1,6 @@
 /**
- * Printing: each page is drawn as a sharp picture (about 150 dots per inch),
- * then the browser's normal print window opens. Pages keep their own
+ * Printing: each page is drawn as a sharp picture (300 dots per inch, like a
+ * laser printer's text), then the browser's normal print window opens. Pages keep their own
  * orientation (portrait or landscape).
  *
  * The same pictures also make a "pictures only" PDF, which the Android app
@@ -8,8 +8,10 @@
  */
 import type { PdfDocument } from "../../core/pdf-engine";
 
-const DOTS_PER_INCH = 150;
-const MAX_PIXELS = 6_000_000;
+const DOTS_PER_INCH = 300;
+/** Very large pages are drawn a little less sharp, to stay within what browsers can draw (about 12 million dots). */
+const MAX_PIXELS = 12_000_000;
+const JPEG_QUALITY = 0.94;
 
 let cleanup: (() => void) | null = null;
 
@@ -18,7 +20,7 @@ async function pagePicture(doc: PdfDocument, index: number): Promise<Blob | null
   const { width, height } = doc.pageSizes[index];
   const ppp = Math.min(DOTS_PER_INCH / 72, Math.sqrt(MAX_PIXELS / (width * height)));
   const canvas = await doc.renderForPrint(index, ppp);
-  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", JPEG_QUALITY));
   canvas.width = 0;
   canvas.height = 0;
   return blob;
@@ -52,7 +54,10 @@ export async function printDocument(doc: PdfDocument, onProgress: (page: number,
     cleanup = null;
   };
   window.addEventListener("afterprint", () => cleanup?.(), { once: true });
-  window.print();
+  // In the Mac app, print() asks the app to open macOS's print window and
+  // reports if it couldn't. (The pictures are cleaned up at the next print.)
+  const opened = window.print() as unknown;
+  if (opened instanceof Promise) await opened;
 }
 
 /** A new PDF with each page as a picture, at the page's own size (for printing files that can't be copied). */

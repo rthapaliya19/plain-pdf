@@ -184,7 +184,7 @@ function redPixels(file, frac) {
   const lockedSize = JSON.parse(execFileSync("python3", ["-I", "-c", "import sys,json\nfrom pypdf import PdfReader\nr = PdfReader(sys.argv[1])\nr.decrypt('secret123')\np = r.pages[0]\nprint(json.dumps({'n': len(r.pages), 'w': float(p.mediabox.width), 'h': float(p.mediabox.height)}))", pdf("locked-password-secret123.pdf")]).toString());
   check("...then prints it as page pictures, unlocked so Android can read it", !info.enc && info.imgs === 1 && info.n === lockedSize.n, JSON.stringify(info));
   check("...at the page's own size", Math.abs(info.w - lockedSize.w) < 1 && Math.abs(info.h - lockedSize.h) < 1, `${info.w}x${info.h}`);
-  check("...sharp (about 150 dots per inch)", Math.abs(info.iw - (lockedSize.w * 150) / 72) < 3, `${info.iw} pixels wide`);
+  check("...sharp (300 dots per inch)", Math.abs(info.iw - (lockedSize.w * 300) / 72) < 3, `${info.iw} pixels wide`);
   check("...named after the file", job.name === "locked-password-secret123.pdf", job.name);
   check("no browser print window at any point", (await page.evaluate(() => window.__browserPrints)) === 0);
   check("desktop: no privacy-lock violations", (await page.evaluate(() => window.__csp)).length === 0);
