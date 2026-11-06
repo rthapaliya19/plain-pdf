@@ -4,7 +4,7 @@
  * and adding pages from other files change the list. The rest of the app sees
  * the list as one ordinary document.
  */
-import type { LinkHandler, Matrix, PageSize, PdfDocument } from "./pdf-engine";
+import type { LinkHandler, Matrix, OutlineItem, PageSize, PdfDocument } from "./pdf-engine";
 
 export interface Source {
   name: string;
@@ -73,9 +73,41 @@ export function workspaceDocument(sources: readonly Source[], plan: PagePlan): P
     },
     onFormsChanged: (callback) => sources.forEach((s) => s.doc.onFormsChanged(callback)),
     isXfaForm: sources[0].doc.isXfaForm,
+    outline: () => workspaceOutline(sources, plan),
     bytesWithFormValues: () => sources[0].doc.bytesWithFormValues(),
     close: async () => {
       for (const s of sources) await s.doc.close();
     },
   };
 }
+
+/**
+ * The chapter lists of the files, pointing at where their pages are now (or
+ * nowhere, if a page was deleted). Chapters of added files are grouped under
+ * each file's name.
+ */
+async function workspaceOutline(sources: readonly Source[], plan: PagePlan): Promise<OutlineItem[]> {
+  const result: OutlineItem[] = [];
+  for (let s = 0; s < sources.length; s++) {
+    const position = (page: number | null) => {
+      if (page === null) return null;
+      const at = plan.findIndex((e) => e.source === s && e.index === page);
+      return at >= 0 ? at : null;
+    };
+    const remap = (items: OutlineItem[]): OutlineItem[] =>
+      items.map((item) => {
+        const page = position(item.page);
+        return { ...item, page, point: page === null ? null : item.point, items: remap(item.items) };
+      });
+    const items = remap(await sources[s].doc.outline());
+    if (items.length === 0) continue;
+    if (s === 0) {
+      result.push(...items);
+    } else {
+      const first = plan.findIndex((e) => e.source === s);
+      result.push({ title: sources[s].name, bold: false, italic: false, page: first >= 0 ? first : null, point: null, url: null, items });
+    }
+  }
+  return result;
+}
+

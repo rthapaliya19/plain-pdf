@@ -30,6 +30,7 @@ import { askConfirm, askPassword, showMessage } from "./ui/dialog";
 import { showToast } from "./ui/toast";
 import { icons } from "./ui/icons";
 import { Toolbar } from "./ui/toolbar";
+import { ContentsPanel } from "./ui/contents-panel";
 import { Viewer } from "./viewer/viewer";
 
 /** The open file. `bytes` are the untouched original, kept for saving a copy later. */
@@ -52,6 +53,7 @@ export class App {
   private readonly tools = new ToolManager(this.hub);
   private readonly toolbar: Toolbar;
   private readonly search: Search;
+  private readonly contents: ContentsPanel;
   private readonly organize: OrganizeScreen;
   private readonly startScreen: HTMLElement;
   private readonly busy: HTMLElement;
@@ -86,6 +88,7 @@ export class App {
       toggleText: () => this.tools.toggle("text"),
       save: () => void this.save(),
       search: () => this.search.open(),
+      toggleContents: () => this.contents.toggle(),
       sign: () => {
         this.tools.deactivate();
         void signatures.start();
@@ -122,6 +125,12 @@ export class App {
 
     const main = document.createElement("main");
     main.className = "main";
+    this.contents = new ContentsPanel(this.hub, {
+      goTo: (index, y) => (y === null ? this.viewer.goToPage(index + 1) : this.viewer.scrollToSpot(index, y)),
+      openExternal: (url) => void this.openLinkAfterAsking(url),
+      changed: (available, open) => this.toolbar.setContents(available, open),
+    });
+    this.hub.on("document:opened", () => void this.contents.load(this.current?.doc ?? null));
     this.search = new Search(this.viewer, this.hub, () => this.current?.doc ?? null);
     this.organize = new OrganizeScreen(this.hub, {
       doc: () => this.current?.doc ?? null,
@@ -156,6 +165,8 @@ export class App {
     main.append(
       this.search.element,
       this.viewer.element,
+      this.contents.backdrop,
+      this.contents.element,
       drawTool.options.element,
       textTool.options.element,
       this.startScreen,
@@ -184,11 +195,14 @@ export class App {
 
     this.viewer.setLinkHandler({
       goToPage: (index) => this.viewer.goToPage(index + 1),
-      openExternal: async (url) => {
-        const open = await askConfirm("Open this link in your browser?", url, "Open link", "Cancel");
-        if (open) window.open(url, "_blank", "noopener,noreferrer");
-      },
+      openExternal: (url) => void this.openLinkAfterAsking(url),
     });
+  }
+
+  /** Web links (in the PDF or its chapter list) open in the browser only after asking. */
+  private async openLinkAfterAsking(url: string): Promise<void> {
+    const open = await askConfirm("Open this link in your browser?", url, "Open link", "Cancel");
+    if (open) window.open(url, "_blank", "noopener,noreferrer");
   }
 
   /** Something was added or a form was filled in. */
@@ -573,6 +587,7 @@ export class App {
         event.target instanceof HTMLTextAreaElement ||
         event.target instanceof HTMLSelectElement;
       if (event.key === "Escape" && !typing) {
+        if (this.contents.closeIfCovering()) return;
         this.tools.deactivate();
         return;
       }

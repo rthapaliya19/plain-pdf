@@ -134,6 +134,16 @@ export class Viewer {
     this.updateCurrentPage();
   }
 
+  /** Scrolls so that height `y` of page `index` (points, from the top of the page as shown) is at the top of the window. */
+  scrollToSpot(index: number, y: number): void {
+    const page = this.pages[index];
+    if (!page || !this.doc) return;
+    const scale = page.el.offsetHeight / this.doc.pageSizes[index].height;
+    const top = Math.min(Math.max(y, 0), this.doc.pageSizes[index].height);
+    this.element.scrollTop = page.el.offsetTop + top * scale - 8;
+    this.updateCurrentPage();
+  }
+
   /** The layer on top of page `index` where additions are shown. */
   overlay(index: number): HTMLDivElement | null {
     return this.pages[index]?.overlay ?? null;

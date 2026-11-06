@@ -14,6 +14,7 @@ export interface ToolbarActions {
   sign(): void;
   save(): void;
   search(): void;
+  toggleContents(): void;
   undo(): void;
   redo(): void;
   zoomIn(): void;
@@ -39,6 +40,7 @@ export class Toolbar {
   private readonly pageTotal: HTMLSpanElement;
   private readonly zoomLabel: HTMLButtonElement;
   private readonly saveButton: HTMLButtonElement;
+  private readonly contentsButton: HTMLButtonElement;
   /** Less frequent actions (Print, and later Organize pages and Add pages). */
   readonly moreMenu = new MoreMenu();
   private page = 1;
@@ -122,7 +124,14 @@ export class Toolbar {
     const search = iconButton(icons.search, "", `Search (${MOD}+F)`);
     search.setAttribute("aria-label", "Search");
     search.addEventListener("click", () => actions.search());
-    this.docControls.append(search, pageGroup, zoomGroup);
+    // Shown only when the PDF has a built-in chapter list.
+    this.contentsButton = iconButton(icons.contents, "", "Contents: the document's chapters");
+    this.contentsButton.setAttribute("aria-label", "Contents");
+    this.contentsButton.setAttribute("aria-pressed", "false");
+    this.contentsButton.classList.add("contents-button");
+    this.contentsButton.hidden = true;
+    this.contentsButton.addEventListener("click", () => actions.toggleContents());
+    this.docControls.append(this.contentsButton, search, pageGroup, zoomGroup);
 
     this.saveButton = iconButton(icons.save, "Save", `Save a copy with your changes (${MOD}+S)`);
     this.saveButton.classList.add("save-button");
@@ -167,6 +176,12 @@ export class Toolbar {
       this.drawButton.setAttribute("aria-pressed", String(id === "draw"));
       this.textButton.setAttribute("aria-pressed", String(id === "text"));
     });
+  }
+
+  /** The Contents button: shown when the PDF has a chapter list, pressed while the list is open. */
+  setContents(available: boolean, open: boolean): void {
+    this.contentsButton.hidden = !available;
+    this.contentsButton.setAttribute("aria-pressed", String(open));
   }
 
   /** Save is available once something has been added. */

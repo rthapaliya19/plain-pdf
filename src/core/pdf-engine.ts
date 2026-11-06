@@ -61,6 +61,20 @@ export interface LinkHandler {
   openExternal(url: string): void;
 }
 
+/** An entry of the PDF's built-in chapter list (its "outline" or "bookmarks"). */
+export interface OutlineItem {
+  title: string;
+  bold: boolean;
+  italic: boolean;
+  /** The page it points to (0-based), or null if it points nowhere in the document. */
+  page: number | null;
+  /** Where on that page the chapter starts, in PDF coordinates, if the file says. */
+  point: [number, number] | null;
+  /** A web link instead of a page. */
+  url: string | null;
+  items: OutlineItem[];
+}
+
 /** A 2D transform [a, b, c, d, e, f], as used in PDF files. */
 export type Matrix = [number, number, number, number, number, number];
 
@@ -102,6 +116,8 @@ export interface PdfDocument {
   onFormsChanged(callback: () => void): void;
   /** Old-style Adobe forms (XFA) that can't be filled here. */
   readonly isXfaForm: boolean;
+  /** The PDF's built-in chapter list (empty if it has none). */
+  outline(): Promise<OutlineItem[]>;
   /** The file with the current form answers written in (for saving). */
   bytesWithFormValues(): Promise<Uint8Array>;
   close(): Promise<void>;
@@ -192,6 +208,7 @@ export async function openPdf(bytes: Uint8Array, askPassword: PasswordPrompt): P
   };
   const { info } = await doc.getMetadata().catch(() => ({ info: {} }));
   const encrypted = Boolean((info as { EncryptFilterName?: string | null }).EncryptFilterName);
+  let outline: Promise<OutlineItem[]> | undefined;
 
   return {
     pageCount: doc.numPages,
@@ -312,6 +329,10 @@ export async function openPdf(bytes: Uint8Array, askPassword: PasswordPrompt): P
       formListeners.push(callback);
     },
     isXfaForm: Boolean((doc as unknown as { isPureXfa?: boolean }).isPureXfa),
+    outline() {
+      outline ??= readOutline(doc);
+      return outline;
+    },
     async bytesWithFormValues() {
       return doc.saveDocument();
     },
@@ -319,6 +340,57 @@ export async function openPdf(bytes: Uint8Array, askPassword: PasswordPrompt): P
       await task.destroy();
     },
   };
+}
+
+/** Most entries a chapter list may have (some files have huge ones). */
+const MAX_OUTLINE_ITEMS = 5000;
+
+/** A page and spot from a destination: [page, {name: "XYZ"}, left, top, zoom], [page, {name: "FitH"}, top], ... */
+async function resolveDestination(doc: PDFDocumentProxy, dest: unknown): Promise<Pick<OutlineItem, "page" | "point">> {
+  try {
+    const explicit = typeof dest === "string" ? await doc.getDestination(dest) : (dest as unknown[] | null);
+    if (!Array.isArray(explicit) || explicit.length === 0) return { page: null, point: null };
+    const ref = explicit[0];
+    const page =
+      typeof ref === "number" ? ref : await doc.getPageIndex(ref as Parameters<PDFDocumentProxy["getPageIndex"]>[0]);
+    if (!Number.isInteger(page) || page < 0 || page >= doc.numPages) return { page: null, point: null };
+    const kind = (explicit[1] as { name?: string } | null)?.name;
+    const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+    let left: number | null = null;
+    let top: number | null = null;
+    if (kind === "XYZ") [left, top] = [num(explicit[2]), num(explicit[3])];
+    else if (kind === "FitH" || kind === "FitBH") top = num(explicit[2]);
+    else if (kind === "FitR") [left, top] = [num(explicit[2]), num(explicit[5])];
+    return { page, point: top === null ? null : [left ?? 0, top] };
+  } catch {
+    return { page: null, point: null };
+  }
+}
+
+async function readOutline(doc: PDFDocumentProxy): Promise<OutlineItem[]> {
+  type Raw = Awaited<ReturnType<PDFDocumentProxy["getOutline"]>>[number];
+  let raw: Raw[] | null = null;
+  try {
+    raw = await doc.getOutline();
+  } catch {
+    return [];
+  }
+  let budget = MAX_OUTLINE_ITEMS;
+  const convert = async (list: Raw[]): Promise<OutlineItem[]> => {
+    const out: OutlineItem[] = [];
+    for (const item of list) {
+      if (budget-- <= 0) break;
+      const title = String(item.title ?? "").replace(/\s+/g, " ").trim();
+      const target = item.dest ? await resolveDestination(doc, item.dest) : { page: null, point: null };
+      const url = typeof item.url === "string" && /^(https?:|mailto:)/i.test(item.url) ? item.url : null;
+      const items = await convert((item.items ?? []) as Raw[]);
+      // Leave out entries that lead nowhere and hold nothing.
+      if (target.page === null && !url && items.length === 0) continue;
+      out.push({ title: title || "Untitled", bold: Boolean(item.bold), italic: Boolean(item.italic), url, items, ...target });
+    }
+    return out;
+  };
+  return convert(raw ?? []);
 }
 
 /** The small "link service" PDF.js needs, wired to the app's own page jumping and link confirmation. */

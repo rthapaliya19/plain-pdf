@@ -1451,3 +1451,178 @@ input:focus-visible {
 .edited-text {
   white-space: pre;
 }
+
+/* ---------- Chapter list (Contents) ---------- */
+
+:root {
+  --contents-width: 300px;
+}
+
+.contents-panel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  width: var(--contents-width);
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+}
+
+/* On computers the pages move over to make room. */
+.main.contents-open .viewer {
+  left: var(--contents-width);
+}
+
+.contents-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 8px 4px 16px;
+}
+
+.contents-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.contents-list,
+.contents-group {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.contents-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 8px max(12px, env(safe-area-inset-bottom));
+}
+
+.contents-row {
+  display: flex;
+  align-items: stretch;
+  padding-left: calc(var(--level, 0) * 14px);
+}
+
+.contents-toggle {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.contents-toggle:disabled {
+  cursor: default;
+}
+
+.contents-toggle svg {
+  width: 16px;
+  height: 16px;
+  transition: transform 0.12s ease;
+}
+
+.contents-item[aria-expanded="true"] > .contents-row .contents-toggle svg {
+  transform: rotate(90deg);
+}
+
+.contents-toggle:not(:disabled):hover {
+  background: var(--hover);
+}
+
+.contents-link {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 36px;
+  padding: 8px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+}
+
+.contents-link:hover {
+  background: var(--hover);
+}
+
+.contents-link:disabled {
+  color: var(--muted);
+  opacity: 0.6;
+  cursor: default;
+}
+
+.contents-link:disabled:hover {
+  background: none;
+}
+
+.contents-title {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.contents-page {
+  flex: none;
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.contents-item.current > .contents-row .contents-link {
+  background: var(--selected);
+  color: var(--accent-hover);
+}
+
+.contents-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  background: rgb(15 23 42 / 0.32);
+}
+
+.contents-button[aria-pressed="true"] {
+  background: var(--selected);
+  color: var(--accent);
+}
+
+/* On phones the list slides over the pages and closes once a chapter is chosen. */
+@media (max-width: 640px) {
+  .contents-panel {
+    width: min(86vw, 340px);
+    box-shadow: 4px 0 24px rgb(15 23 42 / 0.18);
+  }
+
+  .main.contents-open .viewer {
+    left: 0;
+  }
+
+  body.has-document .contents-panel {
+    bottom: var(--bottom-bar);
+  }
+
+  .contents-link {
+    min-height: 44px;
+  }
+
+  .contents-toggle {
+    width: 36px;
+  }
+}
