@@ -136,3 +136,21 @@ Decisions:
 - [x] 1.2: Android test build published (v1.2.0-test.7)
 - [x] 1.2: owner tested printing on the Pixel; no fix needed (2026-11-06)
 - [x] 1.2: 1.2.0 apps released for Windows, Mac and Android (2026-11-06)
+
+## Version 1.3: four features (agreed 2026-11-06)
+
+Built in this order, each tried by the owner in the web preview, then one 1.3.0 release for all three devices.
+
+| # | Feature | Decisions |
+|---|---|---|
+| 1 | Chapter list | Uses the PDF's built-in table of contents. A "Contents" button in the top bar, shown only when the PDF has one. Tap a chapter to go there. |
+| 2 | Sharper printing on computers | Print the real file (crisp text) where the Windows and Mac apps allow it; otherwise sharper page pictures. |
+| 3 | Saving password-protected PDFs | Save a copy with changes. When saving, the owner chooses: keep the same password, or save without one. Files marked "no changes allowed" (no password to open) can be signed and saved too; the copy keeps the marking. Printing them then includes the changes. |
+| 4 | Redaction | A Redact tool: drag a box over anything (words, pictures, scans); a black box marks it, and on save everything under it is permanently removed. The rest of the page stays real text. Editing the PDF's own text also truly removes the old words on save. |
+
+- [ ] 1.3: chapter list
+- [ ] 1.3: sharper printing on computers
+- [ ] 1.3: saving password-protected PDFs
+- [ ] 1.3: redaction
+- [ ] 1.3: owner tests the preview
+- [ ] 1.3: release 1.3.0 apps
