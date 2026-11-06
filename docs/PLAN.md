@@ -159,5 +159,5 @@ Built in this order, each tried by the owner in the web preview, then one 1.3.0 
     "ActualText" hidden copies of text on that page are dropped. Shared pictures and drawings are copied first so other pages aren't affected.
   - Where that can't be done safely (unusual font encodings, unusual picture formats, pictures drawn inline), that page is saved as a 300 dpi
     picture with the boxes painted in, and the app says so.
-- [ ] 1.3: owner tests the preview
+- [x] 1.3: owner approved the preview and asked to publish (2026-11-06)
 - [ ] 1.3: release 1.3.0 apps

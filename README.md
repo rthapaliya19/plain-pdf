@@ -18,7 +18,7 @@ A private, offline PDF app for Windows, Android and macOS, with no clutter.
 | 5 | Installable apps for Windows, Android and macOS, set as the default PDF app | Done |
 | 1.1 | Edit the PDF's own text: fix typos, rewrite sentences, cover and retype on scans | Done (version 1.1.0) |
 | 1.2 | Printing in the Android app | Done (version 1.2.0) |
-| 1.3 | Chapter list, sharper printing on computers, saving password-protected PDFs, redaction | Built, waiting for your testing |
+| 1.3 | Chapter list, sharper printing on computers, saving password-protected PDFs, redaction | Done (version 1.3.0) |
 | Later | New ideas | Planned |
 
 The full plan is in [docs/PLAN.md](docs/PLAN.md).
