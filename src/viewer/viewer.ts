@@ -112,6 +112,11 @@ export class Viewer {
     return this.doc!.pageSizes[index];
   }
 
+  /** The drawn picture of page `index`, if it's on screen (for matching colours). */
+  pageCanvas(index: number): HTMLCanvasElement | null {
+    return this.pages[index]?.canvas ?? null;
+  }
+
   /** The element of page `index` (for temporary marks such as search results). */
   pageElement(index: number): HTMLDivElement | null {
     return this.pages[index]?.el ?? null;

@@ -17,8 +17,10 @@ import {
   type PlacedSignature,
   type Stroke,
   type TextBox,
+  type TextEdit,
   type TextHighlight,
 } from "../core/additions";
+import { SCREEN_FONT } from "../core/fonts";
 import type { EventHub } from "../core/events";
 import type { Rect } from "../core/text-layout";
 import type { Viewer } from "../viewer/viewer";
@@ -27,6 +29,8 @@ import { smoothPath } from "./paths";
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 interface Layers {
+  /** Edited PDF text: below highlights and drawings, right on top of the page. */
+  edits: SVGSVGElement;
   highlight: SVGSVGElement;
   ink: SVGSVGElement;
   boxes: HTMLDivElement;
@@ -35,6 +39,8 @@ interface Layers {
 
 /** Additions you can tap, drag and remove: signatures, initials and text. */
 type Movable = PlacedSignature | TextBox;
+/** Additions that get a tappable box (edits can be selected and removed, not dragged). */
+type Boxed = Movable | TextEdit;
 
 export class OverlayRenderer {
   private layers = new Map<number, Layers>();
@@ -130,7 +136,7 @@ export class OverlayRenderer {
     const items = this.additions.onPage(page);
     if (items.length === 0 && !this.layers.has(page)) return;
     const layers = this.layersFor(page);
-    for (const layer of [layers.highlight, layers.ink]) {
+    for (const layer of [layers.edits, layers.highlight, layers.ink]) {
       for (const child of [...layer.children]) if (!child.classList.contains("live")) child.remove();
     }
     layers.boxes.replaceChildren();
@@ -148,6 +154,10 @@ export class OverlayRenderer {
       } else if (item.kind === "text") {
         element = textGroup(item);
         layer = layers.ink;
+        layers.boxes.append(itemBox(item, size, item.id === this.selectedId));
+      } else if (item.kind === "edit") {
+        element = editGroup(item);
+        layer = layers.edits;
         layers.boxes.append(itemBox(item, size, item.id === this.selectedId));
       } else {
         element = signatureGroup(item);
@@ -173,12 +183,13 @@ export class OverlayRenderer {
       overlay.append(svg);
       return svg;
     };
+    const edits = make("layer-edits");
     const highlight = make("layer-highlight");
     const ink = make("layer-ink");
     const boxes = document.createElement("div");
     boxes.className = "layer-boxes";
     overlay.append(boxes);
-    layers = { highlight, ink, boxes, overlay };
+    layers = { edits, highlight, ink, boxes, overlay };
     this.layers.set(page, layers);
     return layers;
   }
@@ -263,28 +274,65 @@ function textGroup(item: TextBox): SVGGElement {
   return g;
 }
 
-function placeBox(box: HTMLElement, sig: Movable, page: { width: number; height: number }): void {
+function placeBox(box: HTMLElement, sig: Boxed, page: { width: number; height: number }): void {
   box.style.left = `${(sig.x / page.width) * 100}%`;
   box.style.top = `${(sig.y / page.height) * 100}%`;
   box.style.width = `${(sig.width / page.width) * 100}%`;
   box.style.height = `${(sig.height / page.height) * 100}%`;
 }
 
-function itemBox(item: Movable, page: { width: number; height: number }, selected: boolean): HTMLDivElement {
+/** The patch over the old words, then the new words in a matching style. */
+function editGroup(e: TextEdit): SVGGElement {
+  const g = document.createElementNS(SVG_NS, "g");
+  g.dataset.id = e.id;
+  g.dataset.kind = e.kind;
+  const patch = document.createElementNS(SVG_NS, "rect");
+  patch.setAttribute("x", String(e.cover.x));
+  patch.setAttribute("y", String(e.cover.y));
+  patch.setAttribute("width", String(e.cover.w));
+  patch.setAttribute("height", String(e.cover.h));
+  patch.setAttribute("fill", e.coverColor);
+  const inner = document.createElementNS(SVG_NS, "g");
+  inner.setAttribute("transform", `matrix(${boxMatrix(e.x, e.y, e.width, e.height, e.turn).join(" ")})`);
+  const text = document.createElementNS(SVG_NS, "text");
+  text.setAttribute("class", "edited-text");
+  text.setAttribute("font-family", SCREEN_FONT[e.family]);
+  text.setAttribute("font-size", String(e.size));
+  text.setAttribute("font-weight", e.bold ? "700" : "400");
+  text.setAttribute("font-style", e.italic ? "italic" : "normal");
+  text.setAttribute("fill", e.color);
+  e.lines.forEach((line, i) => {
+    const span = document.createElementNS(SVG_NS, "tspan");
+    span.setAttribute("x", "0");
+    span.setAttribute("y", String(e.baselineOffset + i * e.lineHeight));
+    span.textContent = line || " ";
+    text.append(span);
+  });
+  inner.append(text);
+  g.append(patch, inner);
+  return g;
+}
+
+function itemBox(item: Boxed, page: { width: number; height: number }, selected: boolean): HTMLDivElement {
   const box = document.createElement("div");
-  box.className = `sig-box${item.kind === "text" ? " text-box" : ""}${selected ? " selected" : ""}`;
+  const kindClass = item.kind === "text" ? " text-box" : item.kind === "edit" ? " text-box edit-box" : "";
+  box.className = `sig-box${kindClass}${selected ? " selected" : ""}`;
   box.dataset.id = item.id;
-  const name = item.kind === "text" ? "Text" : item.role === "initials" ? "Initials" : "Signature";
+  const name = item.kind === "text" ? "Text" : item.kind === "edit" ? "Edit" : item.role === "initials" ? "Initials" : "Signature";
   box.setAttribute(
     "aria-label",
-    item.kind === "text" ? "Text. Drag to move, double-click to edit." : `${name}. Drag to move.`,
+    item.kind === "text"
+      ? "Text. Drag to move, double-click to edit."
+      : item.kind === "edit"
+        ? "Edited text. Double-click to change it; × undoes the edit."
+        : `${name}. Drag to move.`,
   );
   placeBox(box, item, page);
 
   const remove = document.createElement("button");
   remove.type = "button";
   remove.className = "sig-delete";
-  remove.title = `Remove ${name.toLowerCase()}`;
+  remove.title = item.kind === "edit" ? "Undo this edit (show the original text)" : `Remove ${name.toLowerCase()}`;
   remove.setAttribute("aria-label", remove.title);
   remove.textContent = "×";
   box.append(remove);

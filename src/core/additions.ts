@@ -7,6 +7,7 @@
  * of the page as it is shown on screen.
  */
 import type { EventHub } from "./events";
+import type { FontStyle } from "./fonts";
 import type { Rect } from "./text-layout";
 
 interface Base {
@@ -81,7 +82,36 @@ export const TEXT_LINE_HEIGHT = 1.2;
 /** Distance from the top of a line to its baseline, as a fraction of the font size. */
 export const TEXT_BASELINE = 0.9465;
 
-export type Addition = Stroke | TextHighlight | PlacedSignature | TextBox;
+/**
+ * Edited PDF text: a patch in the paper's colour covers the old words, and
+ * the new words are written on top in a matching style. (The old words are
+ * still in the file underneath, only hidden.)
+ */
+export interface TextEdit extends Base, FontStyle {
+  kind: "edit";
+  /** The area hidden by the patch. */
+  cover: Rect;
+  coverColor: string;
+  /** Top-left of the new text block; width is where lines wrap. */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Clockwise turn of the text in its box (when its page was rotated). */
+  turn?: number;
+  /** What was typed, and how it wraps into lines. */
+  text: string;
+  lines: string[];
+  /** The original wording (for reference). */
+  original: string;
+  size: number;
+  color: string;
+  /** Distance between baselines, and from the top of the block to the first baseline. */
+  lineHeight: number;
+  baselineOffset: number;
+}
+
+export type Addition = Stroke | TextHighlight | PlacedSignature | TextBox | TextEdit;
 
 /** The transform [a, b, c, d, e, f] that places a box's content, turned clockwise by `turn`. */
 export function boxMatrix(x: number, y: number, w: number, h: number, turn = 0): [number, number, number, number, number, number] {

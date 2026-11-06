@@ -100,6 +100,18 @@ export function rotateAddition(a: Addition, size: PageSize, turnBy: number): Add
     return { ...a, points };
   }
   if (a.kind === "highlight") return { ...a, rects: a.rects.map((r) => turnRect(r, w, h, turnBy)) };
+  if (a.kind === "edit") {
+    const box = turnRect({ x: a.x, y: a.y, w: a.width, h: a.height }, w, h, turnBy);
+    return {
+      ...a,
+      cover: turnRect(a.cover, w, h, turnBy),
+      x: box.x,
+      y: box.y,
+      width: box.w,
+      height: box.h,
+      turn: ((((a.turn ?? 0) + turnBy) % 360) + 360) % 360,
+    };
+  }
   const box = turnRect({ x: a.x, y: a.y, w: a.width, h: a.height }, w, h, turnBy);
   return { ...a, x: box.x, y: box.y, width: box.w, height: box.h, turn: (((a.turn ?? 0) + turnBy) % 360 + 360) % 360 };
 }

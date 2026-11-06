@@ -7,7 +7,14 @@
  * - Tap a signature to select it: drag it to move, drag the round corner
  *   handle to resize, tap × to remove it. Every change can be undone.
  */
-import { newAdditionMeta, type Additions, type PlacedSignature, type SignatureInk, type TextBox } from "../../core/additions";
+import {
+  newAdditionMeta,
+  type Additions,
+  type PlacedSignature,
+  type SignatureInk,
+  type TextBox,
+  type TextEdit,
+} from "../../core/additions";
 import type { EventHub } from "../../core/events";
 import type { History } from "../../core/history";
 import type { OverlayRenderer } from "../../overlay/overlay-renderer";
@@ -46,8 +53,8 @@ export class SignatureController {
     private readonly history: History,
     private readonly renderer: OverlayRenderer,
     hub: EventHub,
-    /** Called to edit text (double-click, or tapping text that's already selected). */
-    private readonly editText: (item: TextBox) => void,
+    /** Called to edit text or an edit (double-click, or tapping it when already selected). */
+    private readonly editText: (item: TextBox | TextEdit) => void,
   ) {
     const el = viewer.element;
     el.addEventListener("pointerdown", (e) => this.onDown(e));
@@ -61,7 +68,7 @@ export class SignatureController {
     el.addEventListener("dblclick", (e) => {
       const box = (e.target as HTMLElement).closest<HTMLElement>(".sig-box.text-box");
       const item = box ? this.additions.get(box.dataset.id ?? "") : undefined;
-      if (item?.kind === "text") this.editText(item);
+      if (item?.kind === "text" || item?.kind === "edit") this.editText(item);
     });
     window.addEventListener("keydown", (e) => {
       const id = this.renderer.selectedSignature;
@@ -165,7 +172,7 @@ export class SignatureController {
 
   private remove(id: string): void {
     const sig = this.additions.get(id);
-    if (!sig || (sig.kind !== "signature" && sig.kind !== "text")) return;
+    if (!sig || (sig.kind !== "signature" && sig.kind !== "text" && sig.kind !== "edit")) return;
     this.additions.remove(sig);
     this.history.record({
       undo: () => this.additions.add(sig),
@@ -188,7 +195,16 @@ export class SignatureController {
       return;
     }
     const sig = this.additions.get(box.dataset.id ?? "");
-    if (!sig || (sig.kind !== "signature" && sig.kind !== "text") || this.drag) return;
+    if (!sig || this.drag) return;
+    if (sig.kind === "edit") {
+      // Edits stay where the original words were: tap to select, again to change.
+      e.preventDefault();
+      const already = this.renderer.selectedSignature === sig.id;
+      this.renderer.select(sig.id);
+      if (already) this.editText(sig);
+      return;
+    }
+    if (sig.kind !== "signature" && sig.kind !== "text") return;
     e.preventDefault();
     const wasSelected = this.renderer.selectedSignature === sig.id;
     this.renderer.select(sig.id);

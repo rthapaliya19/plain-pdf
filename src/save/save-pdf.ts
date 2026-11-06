@@ -51,8 +51,10 @@ import {
   type PlacedSignature,
   type Stroke,
   type TextBox,
+  type TextEdit,
   type TextHighlight,
 } from "../core/additions";
+import type { FontStyle } from "../core/fonts";
 import type { Matrix } from "../core/pdf-engine";
 
 export class EncryptedPdfError extends Error {
@@ -151,6 +153,7 @@ function copyDetails(from: PDFDocument, to: PDFDocument): void {
 /** Draws every addition onto its page. `pageToPdf[i]` places page i's additions. */
 async function drawAdditions(doc: PDFDocument, additions: Addition[], pageToPdf: readonly Matrix[]): Promise<void> {
   const pages = doc.getPages();
+  const fonts = fontCache(doc);
   // Typed text uses Helvetica, a font every PDF reader has built in.
   const helvetica = additions.some((a) => a.kind === "text") ? await doc.embedFont(StandardFonts.Helvetica) : null;
   const byPage = new Map<number, Addition[]>();
@@ -163,24 +166,82 @@ async function drawAdditions(doc: PDFDocument, additions: Addition[], pageToPdf:
     const page = pages[index];
     if (!page) continue;
     items.sort((a, b) => a.order - b.order);
-    // Same layering as on screen: highlights underneath, ink on top.
+    // Same layering as on screen: edited text first, then highlights, then ink on top.
+    const edits = items.filter((a): a is TextEdit => a.kind === "edit");
     const highlights = items.filter((a) => a.kind === "highlight" || (a.kind === "stroke" && a.tool === "highlighter"));
-    const ink = items.filter((a) => !highlights.includes(a));
+    const ink = items.filter((a) => !highlights.includes(a) && a.kind !== "edit");
 
     const ops: PDFOperator[] = [pushGraphicsState(), concatTransformationMatrix(...pageToPdf[index])];
+    for (const e of edits) {
+      const font = await fonts.get(e);
+      ops.push(...drawEdit(e, font, fonts.keyOn(page, e)));
+    }
     if (highlights.length > 0) {
       ops.push(pushGraphicsState(), setGraphicsState(multiplyBlend(doc, page)));
-      for (const item of highlights) ops.push(...drawAddition(item as Exclude<Addition, TextBox>));
+      for (const item of highlights) ops.push(...drawAddition(item as Exclude<Addition, TextBox | TextEdit>));
       ops.push(popGraphicsState());
     }
     const fontKey = helvetica && ink.some((a) => a.kind === "text") ? page.node.newFontDictionary("PlainPdfHelv", helvetica.ref) : null;
     for (const item of ink) {
       if (item.kind === "text") ops.push(...drawText(item, helvetica!, fontKey!));
-      else ops.push(...drawAddition(item));
+      else ops.push(...drawAddition(item as Exclude<Addition, TextBox | TextEdit>));
     }
     ops.push(popGraphicsState());
     page.pushOperators(...ops);
   }
+}
+
+/** The standard PDF font matching an edit's look (every PDF reader has these built in). */
+function standardFont(style: FontStyle): StandardFonts {
+  const { family, bold, italic } = style;
+  if (family === "serif") {
+    return bold && italic ? StandardFonts.TimesRomanBoldItalic : bold ? StandardFonts.TimesRomanBold : italic ? StandardFonts.TimesRomanItalic : StandardFonts.TimesRoman;
+  }
+  if (family === "mono") {
+    return bold && italic ? StandardFonts.CourierBoldOblique : bold ? StandardFonts.CourierBold : italic ? StandardFonts.CourierOblique : StandardFonts.Courier;
+  }
+  return bold && italic ? StandardFonts.HelveticaBoldOblique : bold ? StandardFonts.HelveticaBold : italic ? StandardFonts.HelveticaOblique : StandardFonts.Helvetica;
+}
+
+/** Embeds each standard font once per saved file and registers it on each page that uses it. */
+function fontCache(doc: PDFDocument) {
+  const embedded = new Map<StandardFonts, PDFFont>();
+  const keys = new Map<string, PDFName>();
+  return {
+    async get(style: FontStyle): Promise<PDFFont> {
+      const name = standardFont(style);
+      if (!embedded.has(name)) embedded.set(name, await doc.embedFont(name));
+      return embedded.get(name)!;
+    },
+    /** Call after get() for the same style. */
+    keyOn(page: PDFPage, style: FontStyle): PDFName {
+      const name = standardFont(style);
+      const id = `${page.ref.toString()}:${name}`;
+      if (!keys.has(id)) keys.set(id, page.node.newFontDictionary(`PlainPdfEdit${keys.size}`, embedded.get(name)!.ref));
+      return keys.get(id)!;
+    },
+  };
+}
+
+/** The patch over the old words, then the new words. */
+function drawEdit(e: TextEdit, font: PDFFont, fontKey: PDFName): PDFOperator[] {
+  const ops: PDFOperator[] = [
+    pushGraphicsState(),
+    setFillingRgbColor(...rgb(e.coverColor)),
+    rectangle(e.cover.x, e.cover.y, e.cover.w, e.cover.h),
+    fill(),
+    concatTransformationMatrix(...boxMatrix(e.x, e.y, e.width, e.height, e.turn)),
+    setFillingRgbColor(...rgb(e.color)),
+    beginText(),
+    setFontAndSize(fontKey, e.size),
+  ];
+  e.lines.forEach((line, i) => {
+    const text = encodable(line, font);
+    if (!text) return;
+    ops.push(setTextMatrix(1, 0, 0, -1, 0, e.baselineOffset + i * e.lineHeight), showText(font.encodeText(text)));
+  });
+  ops.push(endText(), popGraphicsState());
+  return ops;
 }
 
 /**
@@ -218,7 +279,7 @@ function multiplyBlend(doc: PDFDocument, page: PDFPage): PDFName {
   return page.node.newExtGState("PlainPdfHighlight", doc.context.register(state));
 }
 
-function drawAddition(item: Exclude<Addition, TextBox>): PDFOperator[] {
+function drawAddition(item: Exclude<Addition, TextBox | TextEdit>): PDFOperator[] {
   if (item.kind === "stroke") return drawStroke(item);
   if (item.kind === "highlight") return drawHighlight(item);
   return drawSignature(item);
