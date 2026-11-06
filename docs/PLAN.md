@@ -108,3 +108,17 @@ Decisions:
 - [x] Phase 5: Windows and Mac apps built (v1.0.0 release)
 - [x] Phase 5: Android app built and signed with the permanent key (SHA-256 fingerprint 4c8c2b68...06059569)
 - [x] Phase 5: owner installed on Windows, Pixel and Mac; everything works (2026-11-06)
+
+## Version 1.1: editing the PDF's own text (agreed 2026-11-06)
+
+- Lives in the Text tool: tapping the PDF's text edits that line; dragging down across lines edits them as a paragraph (rewraps to the original width); tapping empty space adds new text as before.
+- How: a patch in the paper's colour covers the old words; the new words are written in the closest standard font (Helvetica, Times or Courier, with bold/italic), at the original size, position and colour. On screen: Arimo, Tinos, Cousine (same widths).
+- The old words stay in the file underneath (search/copy in other apps can find them); a one-time reminder says so. True removal (redaction) would be a later feature.
+- Longer wording grows downward with an orange outline and a "Shrink to fit" button.
+- Scans: drag a box over the words, it's covered in the paper's colour, type the replacement (size starts from the box height). No OCR.
+- In the Text tool on phones, one finger taps/drags and two fingers scroll (like Draw).
+- Release as 1.1.0 for all three devices after the owner tests the preview.
+
+- [x] 1.1: editing built and tested (25 checks; 342 in all)
+- [ ] 1.1: owner tests the preview
+- [ ] 1.1: release 1.1.0 apps

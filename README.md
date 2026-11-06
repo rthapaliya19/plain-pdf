@@ -16,7 +16,8 @@ A private, offline PDF app for Windows, Android and macOS, with no clutter.
 | 3 | Signature and initials: draw once, remembered on the device, place and resize | Done |
 | 4 | Save a copy with additions locked into the page | Done |
 | 5 | Installable apps for Windows, Android and macOS, set as the default PDF app | Done |
-| Later | Text editing (fixing typos, rewriting sentences) and new ideas | Planned |
+| 1.1 | Edit the PDF's own text: fix typos, rewrite sentences, cover and retype on scans | Done, waiting for your testing |
+| Later | New ideas | Planned |
 
 The full plan is in [docs/PLAN.md](docs/PLAN.md).
 
@@ -58,6 +59,7 @@ When there's a new version, download and install it the same way, over the old o
 - **Draw:** click **Draw**, then pick black, blue or red (with a thickness), the yellow highlighter, or the eraser. Click **Done** (or press Esc) to go back to scrolling. On a phone, one finger draws and two fingers scroll and zoom.
 - **Highlighter:** drag over text and it snaps to the words and lines you cover, like selecting text. On scanned pages (which are pictures, with no text the app can read) it draws a straight line, level when you drag roughly level.
 - **Text:** click **Text**, then tap anywhere on a page and type. Pick a size (small, medium, large) and black, blue or red. Tap elsewhere, **Done** or Esc to finish. Tap text to edit it; drag it to move it. Outside the Text tool, click text to select it (× removes it) and double-click (or tap it again) to edit.
+- **Edit the PDF's own text:** with **Text** on, tap a line of the PDF's text to change it, or drag down across several lines to rewrite them as one paragraph (it rewraps to the original width). The old words are covered by a patch in the paper's colour and the new words are written in a matching style (plain, serif or typewriter; bold or italic; same size and colour). If the new wording needs more room, an orange outline and **Shrink to fit** appear. On scans (pictures of text), drag a box over the words, then type the replacement. Tap an edit to change it again; outside the Text tool, select it and tap × to undo it. Note: the old words stay in the file underneath, so search or copy in other apps can still find them. In the Text tool on a phone, one finger taps and drags; two fingers scroll and zoom.
 - **Forms:** fillable boxes, checkboxes, radio buttons and dropdowns just work: click and type. When you save, the answers are locked into the copy. Old Adobe "XFA" forms can't be filled.
 - **Links:** links inside the PDF jump to their page; web links ask before opening in your browser.
 - **Select and copy:** drag across text (or long-press on a phone) and copy it. Scanned pages have no text to select.
@@ -92,7 +94,8 @@ src/
     additions.ts       everything added on top of the PDF (strokes now, signatures later)
     history.ts         undo and redo
     tools.ts           tools plug in here; one is active at a time
-    text-layout.ts     finds the lines and words of text on a page, so highlights can snap to them
+    text-layout.ts     finds the lines and words of text on a page (for highlights, search and editing)
+    fonts.ts           the three matching font looks (screen fonts with the same widths as the PDF's standard fonts)
     workspace.ts       the page list: which file and page each page comes from, and its rotation
     page-ops.ts        rotate, delete, move, add and pick pages, keeping additions on their pages
   overlay/
@@ -101,7 +104,7 @@ src/
   tools/
     draw/              the Draw tool: pen, highlighter, eraser and its options strip
     sign/              signatures and initials: the pad, saving them on the device, placing, moving and resizing
-    text/              the Text tool: typing on pages, sizes and colours
+    text/              the Text tool: typing on pages, editing the PDF's own words (pdf-text-edit.ts), colour matching
     search/            the search bar and the page text index
     print/             printing (pages drawn as pictures, then the print window)
     organize/          the Organize pages screen (select, rotate, delete, drag to reorder)
@@ -131,6 +134,7 @@ tests/
   e2e/forms.test.cjs     browser tests for filling forms and following links
   e2e/roundb.test.cjs    browser tests for selecting and copying text, search and print
   e2e/roundc.test.cjs    browser tests for organizing, merging and splitting
+  e2e/edit.test.cjs      browser tests for editing the PDF's own text
   fixtures/              sample PDFs used by the tests
 ```
 
@@ -161,8 +165,9 @@ node tests/e2e/text.test.cjs
 node tests/e2e/forms.test.cjs
 node tests/e2e/roundb.test.cjs
 node tests/e2e/roundc.test.cjs
+node tests/e2e/edit.test.cjs
 ```
 
 ## License
 
-MIT. See [LICENSE](LICENSE). Uses [PDF.js](https://github.com/mozilla/pdf.js) (Apache 2.0), [pdf-lib](https://github.com/Hopding/pdf-lib) (MIT) and the [Arimo](https://github.com/googlefonts/arimo) font (SIL Open Font License 1.1).
+MIT. See [LICENSE](LICENSE). Uses [PDF.js](https://github.com/mozilla/pdf.js) (Apache 2.0), [pdf-lib](https://github.com/Hopding/pdf-lib) (MIT) and the [Arimo, Tinos and Cousine](https://github.com/googlefonts/) fonts (SIL Open Font License 1.1).
