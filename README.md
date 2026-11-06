@@ -17,6 +17,7 @@ A private, offline PDF app for Windows, Android and macOS, with no clutter.
 | 4 | Save a copy with additions locked into the page | Done |
 | 5 | Installable apps for Windows, Android and macOS, set as the default PDF app | Done |
 | 1.1 | Edit the PDF's own text: fix typos, rewrite sentences, cover and retype on scans | Done (version 1.1.0) |
+| 1.2 | Printing in the Android app | Built, waiting for your testing |
 | Later | New ideas | Planned |
 
 The full plan is in [docs/PLAN.md](docs/PLAN.md).
@@ -64,7 +65,7 @@ When there's a new version, download and install it the same way, over the old o
 - **Links:** links inside the PDF jump to their page; web links ask before opening in your browser.
 - **Select and copy:** drag across text (or long-press on a phone) and copy it. Scanned pages have no text to select.
 - **Search:** click the magnifying glass (or Ctrl+F, Cmd+F on Mac). Matches are highlighted; Enter and Shift+Enter go to the next and previous match; Esc closes.
-- **Print:** in the **⋯ More** menu (or Ctrl+P, Cmd+P). Prints what a saved copy would contain, including your drawings, text, signatures and form answers.
+- **Print:** in the **⋯ More** menu (or Ctrl+P, Cmd+P). Prints what a saved copy would contain, including your drawings, text, signatures and form answers. On Android, it opens Android's own print screen: choose your printer (or **Save as PDF**), copies and pages there. Password-protected PDFs print without your changes.
 - **Organize pages:** in the **⋯ More** menu. A grid of page previews: tap pages to select them (Shift-click for a range), then **Rotate left/right**, **Delete**, or **Save as new PDF** (just the selected pages). Drag pages to reorder them; on a phone, press and hold a page, then drag. Drawings, text and signatures stay with their page and turn with it. Everything can be undone.
 - **Add pages from another PDF:** in the **⋯ More** menu or the Organize screen. Adds all pages of one or more files to the end. Save then makes one combined file. (Fillable form fields are locked into the pages when pages are reorganized or combined.)
 - **Sign:** click **Sign** to open the Sign panel with your **signature** and **initials**. The first time, tap "+ Add signature" or "+ Add initials" and draw them (they're saved only on this device). After that, tap one to place it, or use **Draw new** or **Remove**. A placed signature appears in the middle of the page you're viewing: drag it to move, drag the round corner to resize, and tap × (or press Delete) to remove it.
@@ -135,6 +136,7 @@ tests/
   e2e/roundb.test.cjs    browser tests for selecting and copying text, search and print
   e2e/roundc.test.cjs    browser tests for organizing, merging and splitting
   e2e/edit.test.cjs      browser tests for editing the PDF's own text
+  e2e/android-print.test.cjs  browser tests for printing in the Android app (with a stand-in for Android's print screen)
   fixtures/              sample PDFs used by the tests
 ```
 
@@ -142,11 +144,11 @@ Each page in the viewer has an overlay layer on top of the PDF drawing. The pen,
 
 ### Installed apps (Tauri)
 
-The same web app runs inside small native apps built with [Tauri 2](https://tauri.app) (`src-tauri/`). The native part only opens the window and receives PDFs the system asks it to open; `src/platform/native.ts` uses the system's Open and Save windows. Android extras are in `android/MainActivity.kt` and `scripts/android-setup.mjs`.
+The same web app runs inside small native apps built with [Tauri 2](https://tauri.app) (`src-tauri/`). The native part only opens the window and receives PDFs the system asks it to open; `src/platform/native.ts` uses the system's Open and Save windows. Android extras are in `android/MainActivity.kt` and `scripts/android-setup.mjs`. The Android app's screen can't print by itself, so `src/platform/android-print.ts` hands the finished PDF to Android's print screen through `window.PlainPdfPrinter` (added by `MainActivity.kt`).
 
 The Android app is signed with a key kept in the repository's Actions secrets `ANDROID_KEYSTORE_BASE64` (the key file, base64) and `ANDROID_KEYSTORE_PASSWORD`, so updates install over earlier versions. Keep a private backup of both.
 
-Pushing to the `release` branch runs `.github/workflows/apps.yml`, which builds the Windows installer, the Mac app (Apple chips and Intel) and the Android app, and publishes them as a release named after the version in `src-tauri/tauri.conf.json`. To build locally: `npx tauri build` (needs Rust).
+Pushing to the `release` branch runs `.github/workflows/apps.yml`, which builds the Windows installer, the Mac app (Apple chips and Intel) and the Android app, and publishes them as a release named after the version in `src-tauri/tauri.conf.json`. Pushing to the `android-test` branch builds only the Android app and publishes it as a pre-release (for example `v1.2.0-test.3`) for trying on the phone first. To build locally: `npx tauri build` (needs Rust).
 
 ### Privacy lock
 
@@ -166,6 +168,7 @@ node tests/e2e/forms.test.cjs
 node tests/e2e/roundb.test.cjs
 node tests/e2e/roundc.test.cjs
 node tests/e2e/edit.test.cjs
+node tests/e2e/android-print.test.cjs   # needs pypdf and pdftoppm (poppler)
 ```
 
 ## License

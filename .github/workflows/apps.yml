@@ -1,11 +1,15 @@
 # Builds the installable apps and publishes them on the GitHub Releases page,
 # under the version in src-tauri/tauri.conf.json (for example v1.0.0).
 # Runs when code is pushed to the "release" branch.
+#
+# Pushing to the "android-test" branch builds only the Android app and
+# publishes it as a pre-release (for example v1.2.0-test.3), for trying a
+# change on the phone before the real release. The "latest" release stays as it was.
 name: Build apps
 
 on:
   push:
-    branches: [release]
+    branches: [release, android-test]
   workflow_dispatch:
 
 permissions:
@@ -24,6 +28,7 @@ jobs:
             runner: macos-latest
             args: "--target universal-apple-darwin"
     name: ${{ matrix.name }}
+    if: github.ref_name != 'android-test'
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
@@ -113,9 +118,23 @@ jobs:
           "$TOOLS/apksigner" verify --print-certs "Plain.PDF_${VERSION}_android.apk" | grep -i "SHA-256"
           rm release.jks
       - uses: softprops/action-gh-release@v3
+        if: github.ref_name != 'android-test'
         with:
           tag_name: v${{ env.VERSION }}
           name: Plain PDF v${{ env.VERSION }}
           target_commitish: ${{ github.sha }}
           files: Plain.PDF_${{ env.VERSION }}_android.apk
           overwrite_files: true
+      - name: Publish the Android test build (pre-release)
+        if: github.ref_name == 'android-test'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ env.VERSION }}-test.${{ github.run_number }}
+          name: Plain PDF v${{ env.VERSION }} test ${{ github.run_number }} (Android only)
+          target_commitish: ${{ github.sha }}
+          prerelease: true
+          make_latest: false
+          body: |
+            A test build of the Android app, for trying it out before the real release.
+            On the Pixel, download the `.apk` file and install it over the current app (nothing is lost).
+          files: Plain.PDF_${{ env.VERSION }}_android.apk

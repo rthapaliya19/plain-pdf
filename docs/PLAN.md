@@ -123,3 +123,16 @@ Decisions:
 - [x] 1.1: owner tested the preview; works well (2026-11-06)
 - [x] 1.1: 1.1.0 apps released for Windows, Mac and Android (2026-11-06)
 - [x] 1.1: owner installed 1.1.0 on Windows, Pixel and Mac; everything works (2026-11-06)
+
+## Version 1.2: printing in the Android app (agreed 2026-11-06)
+
+- Print is in the More menu on the Pixel too, as on computers.
+- It opens Android's own print screen (printers, Save as PDF, copies, pages). The owner prints to a Brother HL Wi-Fi printer and uses Save as PDF.
+- Sharp text: Android gets the same file Save would make (drawings, text, signatures, form answers and page changes locked in). Password-protected PDFs print as page pictures, without the changes, after asking (as on computers).
+- The file is handed over inside the phone (the app's private cache) and deleted when the print screen closes. The app still makes no connections.
+- Test first: an Android-only pre-release (push to the `android-test` branch), then 1.2.0 for all three after the owner approves. Computers can skip 1.2.0 (no change there).
+
+- [x] 1.2: built and tested in the browser (29 checks; 371 in all)
+- [ ] 1.2: Android test build published
+- [ ] 1.2: owner tests printing on the Pixel
+- [ ] 1.2: release 1.2.0 apps
