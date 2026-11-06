@@ -148,7 +148,7 @@ Built in this order, each tried by the owner in the web preview, then one 1.3.0 
 | 3 | Saving password-protected PDFs | Save a copy with changes. When saving, the owner chooses: keep the same password, or save without one. Files marked "no changes allowed" (no password to open) can be signed and saved too; the copy keeps the marking. Printing them then includes the changes. |
 | 4 | Redaction | A Redact tool: drag a box over anything (words, pictures, scans); a black box marks it, and on save everything under it is permanently removed. The rest of the page stays real text. Editing the PDF's own text also truly removes the old words on save. |
 
-- [ ] 1.3: chapter list
+- [x] 1.3: chapter list (43 checks; 414 in all)
 - [ ] 1.3: sharper printing on computers
 - [ ] 1.3: saving password-protected PDFs
 - [ ] 1.3: redaction

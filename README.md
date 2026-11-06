@@ -58,6 +58,7 @@ When there's a new version, download and install it the same way, over the old o
 - **Open a PDF:** click **Open** (or press Ctrl+O, Cmd+O on Mac), or drag a PDF into the window.
 - **Zoom:** the minus and plus buttons, Ctrl and the mouse wheel, pinching on a trackpad or phone, or Ctrl+= and Ctrl+-. Ctrl+0 or clicking the percentage fits the page to the window.
 - **Go to a page:** type the page number in the box at the top right and press Enter.
+- **Chapters:** if the PDF has a built-in table of contents, a **Contents** button (a list icon) appears in the top bar. It opens the chapter list: tap a chapter to go there, and tap the arrow beside a chapter to see its sections. The chapter you're reading is highlighted. On a computer the list stays open beside the pages; on a phone it closes once you choose.
 - **Draw:** click **Draw**, then pick black, blue or red (with a thickness), the yellow highlighter, or the eraser. Click **Done** (or press Esc) to go back to scrolling. On a phone, one finger draws and two fingers scroll and zoom.
 - **Highlighter:** drag over text and it snaps to the words and lines you cover, like selecting text. On scanned pages (which are pictures, with no text the app can read) it draws a straight line, level when you drag roughly level.
 - **Text:** click **Text**, then tap anywhere on a page and type. Pick a size (small, medium, large) and black, blue or red. Tap elsewhere, **Done** or Esc to finish. Tap text to edit it; drag it to move it. Outside the Text tool, click text to select it (× removes it) and double-click (or tap it again) to edit.
@@ -111,6 +112,7 @@ src/
     print/             printing (pages drawn as pictures, then the print window)
     organize/          the Organize pages screen (select, rotate, delete, drag to reorder)
   ui/menu.ts           the More menu
+  ui/contents-panel.ts the chapter list (the PDF's own table of contents)
   vendor/              form-field styles copied from PDF.js (Apache 2.0)
   save/
     save-pdf.ts        writes additions into a copy of the PDF (pdf-lib), exactly where they were drawn
@@ -137,6 +139,7 @@ tests/
   e2e/roundb.test.cjs    browser tests for selecting and copying text, search and print
   e2e/roundc.test.cjs    browser tests for organizing, merging and splitting
   e2e/edit.test.cjs      browser tests for editing the PDF's own text
+  e2e/contents.test.cjs  browser tests for the chapter list
   e2e/android-print.test.cjs  browser tests for printing in the Android app (with a stand-in for Android's print screen)
   fixtures/              sample PDFs used by the tests
 ```
@@ -169,6 +172,7 @@ node tests/e2e/forms.test.cjs
 node tests/e2e/roundb.test.cjs
 node tests/e2e/roundc.test.cjs
 node tests/e2e/edit.test.cjs
+node tests/e2e/contents.test.cjs
 node tests/e2e/android-print.test.cjs   # needs pypdf and pdftoppm (poppler)
 ```
 

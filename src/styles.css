@@ -1544,7 +1544,7 @@ input:focus-visible {
   flex: 1;
   min-width: 0;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   min-height: 36px;
   padding: 8px 8px;
