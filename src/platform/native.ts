@@ -19,7 +19,7 @@ function fileName(path: string): string {
   return name.toLowerCase().endsWith(".pdf") ? name : `${name}.pdf`;
 }
 
-/** True in the Android app (where printing isn't available yet). */
+/** True in the Android app. */
 export const isAndroidApp = isNativeApp && /Android/i.test(navigator.userAgent);
 
 async function readAsFile(path: string): Promise<File> {

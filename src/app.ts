@@ -14,7 +14,7 @@ import { OverlayRenderer } from "./overlay/overlay-renderer";
 import { DrawTool } from "./tools/draw/draw-tool";
 import { SignatureController } from "./tools/sign/signature-controller";
 import { TextTool } from "./tools/text/text-tool";
-import { printDocument } from "./tools/print/print";
+import { printDocument, printablePictures } from "./tools/print/print";
 import { Search } from "./tools/search/search";
 import { OrganizeScreen } from "./tools/organize/organize-screen";
 import {
@@ -24,6 +24,7 @@ import {
   openWithSystemDialog,
   watchSystemOpenRequests,
 } from "./platform/native";
+import { canPrintWithAndroid, printWithAndroid } from "./platform/android-print";
 import { chooseSaveTarget, editedName } from "./save/save-file";
 import { askConfirm, askPassword, showMessage } from "./ui/dialog";
 import { showToast } from "./ui/toast";
@@ -147,8 +148,10 @@ export class App {
       if (isNativeApp) void openManyWithSystemDialog().then((files) => this.addPagesFromFiles(files));
       else this.organize.chooseFilesToAdd();
     });
-    // Android's app view can't print yet; everywhere else, Print is in the More menu.
-    if (!isAndroidApp) this.toolbar.moreMenu.add(icons.print, "Print", isMac() ? "⌘P" : "Ctrl+P", () => void this.print());
+    // Print is in the More menu. (The Android app prints through Android's own print screen.)
+    if (!isAndroidApp || canPrintWithAndroid()) {
+      this.toolbar.moreMenu.add(icons.print, "Print", isAndroidApp ? "" : isMac() ? "⌘P" : "Ctrl+P", () => void this.print());
+    }
 
     main.append(
       this.search.element,
@@ -468,6 +471,10 @@ export class App {
     const progress = (text: string) => (this.busy.querySelector("p")!.textContent = text);
     progress("Preparing to print…");
     try {
+      if (canPrintWithAndroid()) {
+        await this.printWithAndroid(file, progress);
+        return;
+      }
       if (this.additions.size > 0) {
         if (file.doc.encrypted) {
           this.busy.hidden = true;
@@ -493,6 +500,37 @@ export class App {
       this.busy.hidden = true;
       await temporary?.close();
     }
+  }
+
+  /**
+   * Android: hands Android's print screen the same file Save would make (sharp
+   * text). Encrypted files can't be copied yet, so they print as page pictures,
+   * without the changes, as on computers.
+   */
+  private async printWithAndroid(file: OpenFile, progress: (text: string) => void): Promise<void> {
+    let bytes: Uint8Array;
+    let name = file.name;
+    if (file.doc.encrypted) {
+      if (this.additions.size > 0) {
+        this.busy.hidden = true;
+        const go = await askConfirm(
+          "Print without your changes?",
+          "This PDF is encrypted, so Plain PDF can't add your changes to the printout yet.",
+          "Print without changes",
+          "Cancel",
+        );
+        if (!go) return;
+        this.busy.hidden = false;
+      }
+      bytes = await printablePictures(file.doc, (page, total) => progress(`Preparing page ${page} of ${total} for printing…`));
+    } else if (this.hasChanges) {
+      bytes = await this.buildCopy(file);
+      name = editedName(file.name);
+    } else {
+      bytes = file.bytes;
+    }
+    progress("Opening the print screen…");
+    printWithAndroid(bytes, name);
   }
 
   private buildStartScreen(): HTMLElement {
