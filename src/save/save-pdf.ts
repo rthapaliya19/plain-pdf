@@ -57,7 +57,7 @@ import {
 } from "../core/additions";
 import type { FontStyle } from "../core/fonts";
 import type { Matrix } from "../core/pdf-engine";
-import { redactPage, replaceWithPicture, type Area } from "./redact";
+import { redactPage, removeUnreachable, replaceWithPicture, type Area } from "./redact";
 
 /** A shown-page rectangle (points, top-left origin) and the colour it's painted. */
 export interface PaintedRect {
@@ -103,7 +103,7 @@ export async function saveWithAdditions(
 
   if (options.lockForms) lockFormAnswers(doc);
 
-  await drawAdditions(doc, additions, pageToPdf, options);
+  if (await drawAdditions(doc, additions, pageToPdf, options)) removeUnreachable(doc);
   return doc.save();
 }
 
@@ -148,7 +148,7 @@ export async function saveWorkspace(
     page.setRotation(degrees((((page.getRotation().angle + entry.rotation) % 360) + 360) % 360));
     out.addPage(page);
   }
-  await drawAdditions(out, additions, pageToPdf, options);
+  if (await drawAdditions(out, additions, pageToPdf, options)) removeUnreachable(out);
   return out.save();
 }
 
@@ -198,8 +198,12 @@ function toArea(r: PaintedRect, toPdf: Matrix): Area {
   return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys), color: rgb(r.color) };
 }
 
-/** Draws every addition onto its page. `pageToPdf[i]` places page i's additions. */
-async function drawAdditions(doc: PDFDocument, additions: Addition[], pageToPdf: readonly Matrix[], options: RedactionOptions = {}): Promise<void> {
+/**
+ * Draws every addition onto its page. `pageToPdf[i]` places page i's additions.
+ * Returns true if anything was redacted (so leftovers can be cleared out).
+ */
+async function drawAdditions(doc: PDFDocument, additions: Addition[], pageToPdf: readonly Matrix[], options: RedactionOptions = {}): Promise<boolean> {
+  let redacted = false;
   const pages = doc.getPages();
   const fonts = fontCache(doc);
   // Typed text uses Helvetica, a font every PDF reader has built in.
@@ -217,6 +221,7 @@ async function drawAdditions(doc: PDFDocument, additions: Addition[], pageToPdf:
     // First, remove for good whatever lies under redaction boxes and edit patches.
     const cleared = clearedRects(items);
     if (cleared.length > 0) {
+      redacted = true;
       const result = await redactPage(doc, page, cleared.map((r) => toArea(r, pageToPdf[index])));
       if (!result.ok) {
         if (!options.pagePicture) throw new Error(`Page ${index + 1} can't be redacted: ${result.reason}`);
@@ -247,6 +252,7 @@ async function drawAdditions(doc: PDFDocument, additions: Addition[], pageToPdf:
     ops.push(popGraphicsState());
     page.pushOperators(...ops);
   }
+  return redacted;
 }
 
 /** The standard PDF font matching an edit's look (every PDF reader has these built in). */

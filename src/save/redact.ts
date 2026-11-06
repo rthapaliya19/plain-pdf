@@ -1104,3 +1104,36 @@ export async function replaceWithPicture(doc: PDFDocument, page: PDFPage, toPdf:
   forgetContentStream(page);
 }
 
+
+/**
+ * Deletes every object nothing refers to any more. pdf-lib writes all objects
+ * it knows into a saved file, so without this the page's old drawing
+ * instructions and the original, unpainted pictures would still be inside
+ * the file (unseen, but recoverable).
+ */
+export function removeUnreachable(doc: PDFDocument): void {
+  const ctx = doc.context;
+  const seen = new Set<string>();
+  const visit = (obj: PDFObject | undefined): void => {
+    if (!obj) return;
+    if (obj instanceof PDFRef) {
+      const key = obj.toString();
+      if (seen.has(key)) return;
+      seen.add(key);
+      visit(ctx.lookup(obj));
+    } else if (obj instanceof PDFDict) {
+      for (const [, v] of obj.entries()) visit(v);
+    } else if (obj instanceof PDFArray) {
+      for (const v of obj.asArray()) visit(v);
+    } else if (obj instanceof PDFStream) {
+      visit(obj.dict);
+    }
+  };
+  const { Root, Info, Encrypt } = ctx.trailerInfo;
+  visit(Root);
+  visit(Info);
+  visit(Encrypt);
+  for (const [ref] of ctx.enumerateIndirectObjects()) {
+    if (!seen.has(ref.toString())) ctx.delete(ref);
+  }
+}
