@@ -134,5 +134,5 @@ Decisions:
 
 - [x] 1.2: built and tested in the browser (29 checks; 371 in all)
 - [x] 1.2: Android test build published (v1.2.0-test.7)
-- [ ] 1.2: owner tests printing on the Pixel
+- [x] 1.2: owner tested printing on the Pixel; no fix needed (2026-11-06)
 - [ ] 1.2: release 1.2.0 apps
