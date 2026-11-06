@@ -10,6 +10,7 @@ import type { TextFragment } from "./pdf-engine";
 export interface Word {
   x0: number;
   x1: number;
+  text: string;
 }
 
 /** One line of text (or one column's part of a line). */
@@ -19,6 +20,15 @@ export interface TextLine {
   x0: number;
   x1: number;
   words: Word[];
+  /** The line's words, separated by single spaces. */
+  text: string;
+  baseline: number;
+  /** Font size of the line's largest text. */
+  size: number;
+  /** The look of the line's text (from its first word). */
+  family: TextFragment["family"];
+  bold: boolean;
+  italic: boolean;
 }
 
 export interface Rect {
@@ -56,6 +66,8 @@ interface Piece {
   x1: number;
   baseline: number;
   size: number;
+  text: string;
+  frag: TextFragment;
 }
 
 /** Groups text runs into lines and words. */
@@ -70,7 +82,14 @@ export function buildTextLines(fragments: TextFragment[]): TextLine[] {
       const isSpace = i === chars.length || /\s/.test(chars[i]);
       if (!isSpace && start < 0) start = i;
       if (isSpace && start >= 0) {
-        pieces.push({ x0: f.x + edges[start], x1: f.x + edges[i], baseline: f.baseline, size: f.size });
+        pieces.push({
+          x0: f.x + edges[start],
+          x1: f.x + edges[i],
+          baseline: f.baseline,
+          size: f.size,
+          text: chars.slice(start, i).join(""),
+          frag: f,
+        });
         start = -1;
       }
     }
@@ -93,6 +112,7 @@ export function buildTextLines(fragments: TextFragment[]): TextLine[] {
     const size = Math.max(...row.map((p) => p.size));
     const baseline = row.reduce((sum, p) => sum + p.baseline, 0) / row.length;
     let words: Word[] = [];
+    let first: TextFragment = row[0].frag;
     const flush = () => {
       if (words.length === 0) return;
       lines.push({
@@ -101,6 +121,12 @@ export function buildTextLines(fragments: TextFragment[]): TextLine[] {
         x0: words[0].x0,
         x1: words[words.length - 1].x1,
         words,
+        text: words.map((w) => w.text).join(" "),
+        baseline,
+        size,
+        family: first.family,
+        bold: first.bold,
+        italic: first.italic,
       });
       words = [];
     };
@@ -108,9 +134,14 @@ export function buildTextLines(fragments: TextFragment[]): TextLine[] {
       const last = words[words.length - 1];
       const gap = last ? p.x0 - last.x1 : 0;
       if (last && gap > 2.5 * size) flush();
+      if (words.length === 0) first = p.frag;
       const current = words[words.length - 1];
-      if (current && p.x0 - current.x1 < 0.12 * size) current.x1 = Math.max(current.x1, p.x1);
-      else words.push({ x0: p.x0, x1: p.x1 });
+      if (current && p.x0 - current.x1 < 0.12 * size) {
+        current.x1 = Math.max(current.x1, p.x1);
+        current.text += p.text;
+      } else {
+        words.push({ x0: p.x0, x1: p.x1, text: p.text });
+      }
     }
     flush();
   }

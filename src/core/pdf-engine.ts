@@ -35,6 +35,10 @@ export interface PageSize {
  */
 export interface TextFragment {
   text: string;
+  /** General look of the font: plain (like Arial), serif (like Times) or typewriter (like Courier). */
+  family: "sans" | "serif" | "mono";
+  bold: boolean;
+  italic: boolean;
   /** Left edge. */
   x: number;
   /** Baseline (the line the letters sit on). */
@@ -224,7 +228,8 @@ export async function openPdf(bytes: Uint8Array, askPassword: PasswordPrompt): P
         if (Math.abs(tx[1]) > 0.01 * Math.abs(tx[0]) || tx[0] <= 0) continue;
         const size = Math.hypot(tx[2], tx[3]);
         if (size <= 0) continue;
-        fragments.push({ text: item.str, x: tx[4], baseline: tx[5], width: item.width * viewport.scale, size });
+        const look = fontLook(page, item.fontName, content.styles[item.fontName]?.fontFamily);
+        fragments.push({ text: item.str, x: tx[4], baseline: tx[5], width: item.width * viewport.scale, size, ...look });
       }
       return fragments;
     },
@@ -369,4 +374,34 @@ function makeLinkService(doc: PDFDocumentProxy, links: LinkHandler) {
 /** The page's own rotation plus an extra clockwise turn, as PDF.js expects it. */
 function turned(page: PDFPageProxy, extra: number): number {
   return (((page.rotate + extra) % 360) + 360) % 360;
+}
+
+/** The general look of a font, for matching it when text is edited. */
+function fontLook(page: PDFPageProxy, fontName: string, cssFamily = ""): Pick<TextFragment, "family" | "bold" | "italic"> {
+  let name = "";
+  let bold = false;
+  let italic = false;
+  try {
+    // Known once the page has been drawn.
+    const objs = page.commonObjs as unknown as { has(id: string): boolean; get(id: string): unknown };
+    if (objs.has(fontName)) {
+      const font = objs.get(fontName) as { name?: string; bold?: boolean; black?: boolean; italic?: boolean };
+      name = font.name ?? "";
+      bold = Boolean(font.bold || font.black);
+      italic = Boolean(font.italic);
+    }
+  } catch {
+    // Not loaded: fall back to the name hints below.
+  }
+  const hint = `${name} ${cssFamily}`.toLowerCase();
+  if (/bold|black|heavy|semibold|demi/.test(name.toLowerCase())) bold = true;
+  if (/italic|oblique/.test(name.toLowerCase())) italic = true;
+  const family = /mono|courier|consol|menlo|typewriter/.test(hint)
+    ? "mono"
+    : /sans/.test(hint)
+      ? "sans"
+      : /serif|times|georgia|garamond|minion|cambria|book|roman|palatino/.test(hint)
+        ? "serif"
+        : "sans";
+  return { family, bold, italic };
 }
