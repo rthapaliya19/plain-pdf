@@ -16,7 +16,7 @@ A private, offline PDF app for Windows, Android and macOS, with no clutter.
 | 3 | Signature and initials: draw once, remembered on the device, place and resize | Done |
 | 4 | Save a copy with additions locked into the page | Done |
 | 5 | Installable apps for Windows, Android and macOS, set as the default PDF app | Done |
-| 1.1 | Edit the PDF's own text: fix typos, rewrite sentences, cover and retype on scans | Done, waiting for your testing |
+| 1.1 | Edit the PDF's own text: fix typos, rewrite sentences, cover and retype on scans | Done (version 1.1.0) |
 | Later | New ideas | Planned |
 
 The full plan is in [docs/PLAN.md](docs/PLAN.md).

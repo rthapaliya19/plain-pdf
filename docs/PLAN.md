@@ -120,5 +120,5 @@ Decisions:
 - Release as 1.1.0 for all three devices after the owner tests the preview.
 
 - [x] 1.1: editing built and tested (25 checks; 342 in all)
-- [ ] 1.1: owner tests the preview
+- [x] 1.1: owner tested the preview; works well (2026-11-06)
 - [ ] 1.1: release 1.1.0 apps
