@@ -152,5 +152,12 @@ Built in this order, each tried by the owner in the web preview, then one 1.3.0 
 - [x] 1.3: sharper printing on computers (300 dpi; Mac print permission added; owner to try Mac printing in 1.3.0)
 - [x] 1.3: saving password-protected PDFs (qpdf 0.3.0 build; keeps the exact lock incl. owner password; Android prints an unlocked temporary copy; 34 checks; 453 in all)
 - [ ] 1.3: redaction
+  - Redact is in the More menu (owner's choice). Drag a box; a solid black box shows it; select it to move, resize or remove (×); undo works.
+  - On save (src/save/redact.ts), before additions are drawn: for every redaction box and every text-edit patch, in PDF coordinates:
+    text glyphs touching the box are removed from the page's content (the rest of the line keeps its place); pictures under it get those pixels
+    painted over (black, or the patch's paper colour); vector shapes lying inside it are removed; links, notes and form fields over it are removed;
+    "ActualText" hidden copies of text on that page are dropped. Shared pictures and drawings are copied first so other pages aren't affected.
+  - Where that can't be done safely (unusual font encodings, unusual picture formats, pictures drawn inline), that page is saved as a 300 dpi
+    picture with the boxes painted in, and the app says so.
 - [ ] 1.3: owner tests the preview
 - [ ] 1.3: release 1.3.0 apps
