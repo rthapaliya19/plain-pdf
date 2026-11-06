@@ -88,7 +88,7 @@ const pypdf = (code, file) => execFileSync("python3", ["-I", "-c", `import sys\n
   // Large, blue, two lines.
   await page.click('button[aria-label="Large text"]');
   await page.click('button[aria-label="Blue text"]');
-  await page.mouse.click(...at(70, 390));
+  await page.mouse.click(...at(530, 390)); // an empty spot (tapping the PDF's own text edits it instead)
   await page.waitForSelector(".text-editor");
   await page.keyboard.type("Line one");
   await page.keyboard.press("Enter");

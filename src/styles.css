@@ -1372,3 +1372,82 @@ input:focus-visible {
     display: inline;
   }
 }
+
+/* ---------- Editing the PDF's own text ---------- */
+
+/* In the Text tool, one finger taps and drags (to pick lines or draw a box); two fingers scroll. */
+.viewer.texting {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.edit-patch {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.text-editor.edit-editor {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.text-editor.overflowing {
+  outline-color: #ea580c;
+  outline-width: 2px;
+}
+
+.edit-warning {
+  position: absolute;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px 4px 10px;
+  border: 1px solid #fdba74;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 12px;
+  white-space: nowrap;
+  box-shadow: var(--shadow);
+  pointer-events: auto;
+}
+
+.edit-warning button {
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: #ea580c;
+  color: #ffffff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.select-preview {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.select-rect {
+  position: absolute;
+  border-radius: 2px;
+}
+
+.select-rect.lines {
+  background: rgb(37 99 235 / 0.14);
+  outline: 1px solid rgb(37 99 235 / 0.55);
+}
+
+.select-rect.area {
+  border: 2px dashed var(--accent);
+  background: rgb(37 99 235 / 0.06);
+}
+
+.edited-text {
+  white-space: pre;
+}

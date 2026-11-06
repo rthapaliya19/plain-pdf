@@ -70,7 +70,9 @@ export class App {
       this.tools.deactivate(),
     );
     this.tools.register(drawTool);
-    const textTool = new TextTool(this.viewer, this.additions, this.history, renderer, () => this.tools.deactivate());
+    const textTool = new TextTool(this.viewer, this.additions, this.history, renderer, () => this.textLayout, () =>
+      this.tools.deactivate(),
+    );
     this.tools.register(textTool);
     const signatures = new SignatureController(this.viewer, this.additions, this.history, renderer, this.hub, (item) => {
       this.tools.activate("text");

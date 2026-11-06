@@ -215,6 +215,25 @@ export function highlightRects(
   return rects;
 }
 
+/**
+ * The lines from `startLine` to the line nearest `endY`, top to bottom,
+ * staying in the start line's column (for editing a paragraph).
+ */
+export function linesBetween(lines: TextLine[], startLine: TextLine, endY: number): TextLine[] {
+  const column = lines.filter((l) => l === startLine || (l.x1 > startLine.x0 && l.x0 < startLine.x1));
+  const start = Math.max(0, column.indexOf(startLine));
+  let end = start;
+  let best = Infinity;
+  column.forEach((l, i) => {
+    const distance = endY < l.top ? l.top - endY : endY > l.bottom ? endY - l.bottom : 0;
+    if (distance < best - 0.01) {
+      best = distance;
+      end = i;
+    }
+  });
+  return column.slice(Math.min(start, end), Math.max(start, end) + 1);
+}
+
 /** Remembers each page's text lines once worked out (per open document). */
 export class TextLayoutCache {
   private ready = new Map<number, TextLine[]>();
