@@ -13,9 +13,9 @@ A private, offline PDF app for Windows, Android and macOS, with no clutter.
 | 0 | Project setup and privacy lock | Done |
 | 1 | Viewer: open, scroll, zoom, pinch, page number | Done |
 | 2 | Pen (black, blue, red), yellow highlighter that follows the text, eraser, undo/redo | Done |
-| 3 | Signature and initials: draw once, remembered on the device, place and resize | Done, waiting for your testing |
-| 4 | Save a copy with additions locked into the page | Done, waiting for your testing |
-| 5 | Installable apps for Windows, Android and macOS, set as the default PDF app | Done, waiting for your testing |
+| 3 | Signature and initials: draw once, remembered on the device, place and resize | Done |
+| 4 | Save a copy with additions locked into the page | Done |
+| 5 | Installable apps for Windows, Android and macOS, set as the default PDF app | Done |
 | Later | Text editing (fixing typos, rewriting sentences) and new ideas | Planned |
 
 The full plan is in [docs/PLAN.md](docs/PLAN.md).

@@ -107,4 +107,4 @@ Decisions:
 - [x] Round C: check-in
 - [x] Phase 5: Windows and Mac apps built (v1.0.0 release)
 - [x] Phase 5: Android app built and signed with the permanent key (SHA-256 fingerprint 4c8c2b68...06059569)
-- [ ] Phase 5: owner installs on Windows, Pixel and Mac and sets as default
+- [x] Phase 5: owner installed on Windows, Pixel and Mac; everything works (2026-11-06)
