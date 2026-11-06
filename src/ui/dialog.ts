@@ -42,6 +42,30 @@ export function showMessage(title: string, message: string): Promise<void> {
   });
 }
 
+/** Asks a question with several answers (the last is the main one). Resolves to the chosen value, or null for Cancel. */
+export function askChoice<T>(title: string, message: string, choices: { label: string; value: T }[], cancelLabel = "Cancel"): Promise<T | null> {
+  return new Promise((resolve) => {
+    const dialog = createDialog();
+    const actions = document.createElement("div");
+    actions.className = "dialog-actions wrap";
+    const cancel = button(cancelLabel, false);
+    cancel.addEventListener("click", () => dialog.close());
+    actions.append(cancel);
+    let result: T | null = null;
+    choices.forEach((choice, i) => {
+      const b = button(choice.label, i === choices.length - 1);
+      b.addEventListener("click", () => {
+        result = choice.value;
+        dialog.close();
+      });
+      actions.append(b);
+    });
+    dialog.append(heading(title), paragraph(message), actions);
+    dialog.addEventListener("close", () => resolve(result));
+    dialog.showModal();
+  });
+}
+
 /** Asks a yes/no question. Resolves to true if the confirm button was chosen. */
 export function askConfirm(title: string, message: string, confirmLabel: string, cancelLabel: string): Promise<boolean> {
   return new Promise((resolve) => {

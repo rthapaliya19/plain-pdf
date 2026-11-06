@@ -60,6 +60,8 @@ export function workspaceDocument(sources: readonly Source[], plan: PagePlan): P
     pageSizes,
     pageToPdf,
     encrypted: sources.some((s) => s.doc.encrypted),
+    passwordProtected: sources[0].doc.passwordProtected,
+    password: sources[0].doc.password,
     renderPage: (i, canvas, ppp, extra = 0) => at(i).doc.renderPage(at(i).e.index, canvas, ppp, turn(at(i).e.rotation, extra)),
     textFragments: (i, extra = 0) => at(i).doc.textFragments(at(i).e.index, turn(at(i).e.rotation, extra)),
     renderInteractive: (i, div, links, extra = 0) =>

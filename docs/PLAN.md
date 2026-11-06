@@ -150,7 +150,7 @@ Built in this order, each tried by the owner in the web preview, then one 1.3.0 
 
 - [x] 1.3: chapter list (43 checks; 414 in all)
 - [x] 1.3: sharper printing on computers (300 dpi; Mac print permission added; owner to try Mac printing in 1.3.0)
-- [ ] 1.3: saving password-protected PDFs
+- [x] 1.3: saving password-protected PDFs (qpdf 0.3.0 build; keeps the exact lock incl. owner password; Android prints an unlocked temporary copy; 34 checks; 453 in all)
 - [ ] 1.3: redaction
 - [ ] 1.3: owner tests the preview
 - [ ] 1.3: release 1.3.0 apps

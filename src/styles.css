@@ -691,6 +691,10 @@ input:focus-visible {
   margin-top: 16px;
 }
 
+.dialog-actions.wrap {
+  flex-wrap: wrap;
+}
+
 .button:disabled {
   opacity: 0.45;
   cursor: default;

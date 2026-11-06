@@ -26,7 +26,7 @@ import {
 } from "./platform/native";
 import { canPrintWithAndroid, printWithAndroid } from "./platform/android-print";
 import { chooseSaveTarget, editedName } from "./save/save-file";
-import { askConfirm, askPassword, showMessage } from "./ui/dialog";
+import { askChoice, askConfirm, askPassword, showMessage } from "./ui/dialog";
 import { showToast } from "./ui/toast";
 import { icons } from "./ui/icons";
 import { Toolbar } from "./ui/toolbar";
@@ -297,14 +297,9 @@ export class App {
       showToast("Nothing to save yet. Draw, type, highlight, sign or fill in a form first.");
       return;
     }
-    if (file.doc.encrypted) {
-      await showMessage(
-        "Can't save this file yet",
-        "This PDF is encrypted (password-protected), so Plain PDF can't save a copy with changes yet. Your changes are still here.",
-      );
-      return;
-    }
     this.tools.deactivate();
+    const protection = await this.chooseProtection(file);
+    if (!protection) return;
     // Ask where to save first, while the click still counts as the person's choice.
     const target = await chooseSaveTarget(editedName(file.name));
     if (!target) return;
@@ -312,42 +307,74 @@ export class App {
     this.busy.querySelector("p")!.textContent = "Saving a copy…";
     this.busy.hidden = false;
     try {
-      const bytes = await this.buildCopy(file);
+      const bytes = await this.buildCopy(file, this.pagesState(file), protection);
       await target.write(bytes);
       if (this.current === file) this.dirty = false;
-      showToast(
-        target.kind === "file" ? `Saved a copy: ${target.name}` : `Saved a copy to your Downloads: ${target.name}`,
-        5000,
-      );
+      const where = target.kind === "file" ? `Saved a copy: ${target.name}` : `Saved a copy to your Downloads: ${target.name}`;
+      showToast(file.doc.passwordProtected && protection === "keep" ? `${where} (same password)` : where, 5000);
     } catch (error) {
       console.error(error);
-      await showMessage(
-        "Couldn't save",
-        error instanceof Error && error.name === "EncryptedPdfError"
-          ? error.message
-          : "Something went wrong while saving. Your original file is unchanged, and your changes are still here.",
-      );
+      await showMessage("Couldn't save", saveProblem(error, "Something went wrong while saving."));
     } finally {
       this.saving = false;
       this.busy.hidden = true;
     }
   }
 
-  /** A copy of the open file with everything added (and form answers) locked in. */
-  private async buildCopy(file: OpenFile, state: PagesState = this.pagesState(file)): Promise<Uint8Array> {
+  /**
+   * A copy of the open file with everything added (and form answers) locked in.
+   * If the opened file is password-protected or marked "no changes allowed",
+   * `protection` says whether the copy is locked the same way ("keep") or not.
+   */
+  private async buildCopy(file: OpenFile, state: PagesState = this.pagesState(file), protection: Protection = "remove"): Promise<Uint8Array> {
     // The saving code (pdf-lib) is only loaded the first time it's needed.
     const { saveWithAdditions, saveWorkspace } = await import("./save/save-pdf");
+    let bytes: Uint8Array;
     if (isUnchanged(file.sources, state.plan)) {
-      const filledForms = file.doc.formsModified;
-      const base = filledForms ? await file.doc.bytesWithFormValues() : file.bytes;
-      return saveWithAdditions(base, state.additions, file.doc.pageToPdf, { lockForms: filledForms });
+      const base = await this.unlockedBytes(file.sources[0]);
+      bytes = await saveWithAdditions(base, state.additions, file.doc.pageToPdf, { lockForms: file.doc.formsModified });
+    } else {
+      // Pages were reorganized or added: build a new file from the page list.
+      const sources = await Promise.all(file.sources.map(async (s) => ({ bytes: await this.unlockedBytes(s) })));
+      const placed = workspaceDocument(file.sources, state.plan);
+      bytes = await saveWorkspace(sources, state.plan, state.additions, placed.pageToPdf);
     }
-    // Pages were reorganized or added: build a new file from the page list.
-    const sources = await Promise.all(
-      file.sources.map(async (s) => ({ bytes: s.doc.formsModified ? await s.doc.bytesWithFormValues() : s.bytes })),
+    return this.protect(file, bytes, protection);
+  }
+
+  /** A file's bytes with its form answers written in, and unlocked if it's protected. */
+  private async unlockedBytes(source: Source): Promise<Uint8Array> {
+    const bytes = source.doc.formsModified ? await source.doc.bytesWithFormValues() : source.bytes;
+    if (!source.doc.encrypted) return bytes;
+    const { unlock } = await import("./save/protection");
+    return unlock(bytes, source.doc.password);
+  }
+
+  /** Locks a finished copy like the opened file, if asked to and if it was locked. */
+  private async protect(file: OpenFile, bytes: Uint8Array, protection: Protection): Promise<Uint8Array> {
+    const main = file.sources[0];
+    if (protection !== "keep" || !main.doc.encrypted) return bytes;
+    const { lockLike } = await import("./save/protection");
+    return lockLike(main.bytes, main.doc.password, bytes);
+  }
+
+  /**
+   * For a file that needs a password to open: asks whether the copy should
+   * need the same password. Files only marked "no changes allowed" keep that
+   * mark without asking. Resolves to null if cancelled.
+   */
+  private async chooseProtection(file: OpenFile): Promise<Protection | null> {
+    const main = file.sources[0].doc;
+    if (!main.encrypted) return "remove";
+    if (!main.passwordProtected) return "keep";
+    return askChoice<Protection>(
+      "Keep the password?",
+      "This PDF needs a password to open. Should the copy need the same password?",
+      [
+        { label: "Save without password", value: "remove" },
+        { label: "Keep password", value: "keep" },
+      ],
     );
-    const placed = workspaceDocument(file.sources, state.plan);
-    return saveWorkspace(sources, state.plan, state.additions, placed.pageToPdf);
   }
 
   // ---------- Pages: rotate, delete, move, add, save selected ----------
@@ -446,10 +473,8 @@ export class App {
   async saveSelectedPages(pages: number[]): Promise<void> {
     const file = this.current;
     if (!file || pages.length === 0 || this.saving) return;
-    if (file.doc.encrypted) {
-      await showMessage("Can't save this file yet", "This PDF is encrypted (password-protected), so Plain PDF can't save pages from it yet.");
-      return;
-    }
+    const protection = await this.chooseProtection(file);
+    if (!protection) return;
     const target = await chooseSaveTarget(editedName(file.name).replace(/-edited\.pdf$/, "-selected.pdf"));
     if (!target) return;
     this.saving = true;
@@ -458,15 +483,13 @@ export class App {
     try {
       const picked = pickPages(this.pagesState(file), pages);
       const { saveWorkspace } = await import("./save/save-pdf");
-      const sources = await Promise.all(
-        file.sources.map(async (s) => ({ bytes: s.doc.formsModified ? await s.doc.bytesWithFormValues() : s.bytes })),
-      );
-      const bytes = await saveWorkspace(sources, picked.plan, picked.additions, workspaceDocument(file.sources, picked.plan).pageToPdf);
-      await target.write(bytes);
+      const sources = await Promise.all(file.sources.map(async (s) => ({ bytes: await this.unlockedBytes(s) })));
+      const built = await saveWorkspace(sources, picked.plan, picked.additions, workspaceDocument(file.sources, picked.plan).pageToPdf);
+      await target.write(await this.protect(file, built, protection));
       showToast(`Saved ${pages.length} page${pages.length === 1 ? "" : "s"} as ${target.name}`, 5000);
     } catch (error) {
       console.error(error);
-      await showMessage("Couldn't save", "Something went wrong while saving the selected pages.");
+      await showMessage("Couldn't save", saveProblem(error, "Something went wrong while saving the selected pages."));
     } finally {
       this.saving = false;
       this.busy.hidden = true;
@@ -490,18 +513,10 @@ export class App {
         return;
       }
       if (this.additions.size > 0) {
-        if (file.doc.encrypted) {
-          this.busy.hidden = true;
-          const go = await askConfirm(
-            "Print without your changes?",
-            "This PDF is encrypted, so Plain PDF can't add your changes to the printout yet.",
-            "Print without changes",
-            "Cancel",
-          );
-          if (!go) return;
-          this.busy.hidden = false;
-        } else {
-          temporary = await openPdf(await this.buildCopy(file), askPassword);
+        const copy = await this.printableCopy(file);
+        if (copy === "cancel") return;
+        if (copy) {
+          temporary = await openPdf(copy, askPassword);
           source = temporary;
         }
       }
@@ -518,33 +533,55 @@ export class App {
 
   /**
    * Android: hands Android's print screen the same file Save would make (sharp
-   * text). Encrypted files can't be copied yet, so they print as page pictures,
-   * without the changes, as on computers.
+   * text). Password-protected files are handed over unlocked (Android's print
+   * screen can't open locked ones); the copy is deleted once it closes.
    */
   private async printWithAndroid(file: OpenFile, progress: (text: string) => void): Promise<void> {
     let bytes: Uint8Array;
-    let name = file.name;
+    let name = this.hasChanges ? editedName(file.name) : file.name;
     if (file.doc.encrypted) {
-      if (this.additions.size > 0) {
-        this.busy.hidden = true;
-        const go = await askConfirm(
-          "Print without your changes?",
-          "This PDF is encrypted, so Plain PDF can't add your changes to the printout yet.",
-          "Print without changes",
-          "Cancel",
-        );
-        if (!go) return;
-        this.busy.hidden = false;
+      const copy = await this.printableCopy(file);
+      if (copy === "cancel") return;
+      if (copy) {
+        bytes = copy;
+      } else {
+        // Couldn't unlock it: print pictures of the pages as shown, without the changes.
+        bytes = await printablePictures(file.doc, (page, total) => progress(`Preparing page ${page} of ${total} for printing…`));
+        name = file.name;
       }
-      bytes = await printablePictures(file.doc, (page, total) => progress(`Preparing page ${page} of ${total} for printing…`));
     } else if (this.hasChanges) {
       bytes = await this.buildCopy(file);
-      name = editedName(file.name);
     } else {
       bytes = file.bytes;
     }
     progress("Opening the print screen…");
     printWithAndroid(bytes, name);
+  }
+
+  /**
+   * An unlocked copy with the changes, for printing. If a protected file can't
+   * be unlocked (an unusual kind of protection), asks whether to print without
+   * the changes: resolves to null for "yes", or "cancel".
+   */
+  private async printableCopy(file: OpenFile): Promise<Uint8Array | null | "cancel"> {
+    try {
+      return await this.buildCopy(file);
+    } catch (error) {
+      const { ProtectionError } = await import("./save/protection");
+      if (!(error instanceof ProtectionError)) throw error;
+      console.warn(error);
+      if (this.additions.size === 0) return null;
+      this.busy.hidden = true;
+      const go = await askConfirm(
+        "Print without your changes?",
+        "Plain PDF couldn't unlock this protected PDF to add your changes to the printout.",
+        "Print without changes",
+        "Cancel",
+      );
+      if (!go) return "cancel";
+      this.busy.hidden = false;
+      return null;
+    }
   }
 
   private buildStartScreen(): HTMLElement {
@@ -656,3 +693,15 @@ function overlay(className: string, text: string): HTMLElement {
   el.append(p);
   return el;
 }
+
+/** Whether a copy of a protected file is locked the same way ("keep") or saved without the lock ("remove"). */
+type Protection = "keep" | "remove";
+
+/** A message for a failed save: protected files that couldn't be unlocked get their own explanation. */
+function saveProblem(error: unknown, general: string): string {
+  if (error instanceof Error && (error.name === "ProtectionError" || error.name === "EncryptedPdfError")) {
+    return "Plain PDF couldn't unlock this protected PDF to add your changes (it may use an unusual kind of protection). Your original file is unchanged, and your changes are still here.";
+  }
+  return `${general} Your original file is unchanged, and your changes are still here.`;
+}
+

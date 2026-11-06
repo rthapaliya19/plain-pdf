@@ -67,11 +67,12 @@ When there's a new version, download and install it the same way, over the old o
 - **Links:** links inside the PDF jump to their page; web links ask before opening in your browser.
 - **Select and copy:** drag across text (or long-press on a phone) and copy it. Scanned pages have no text to select.
 - **Search:** click the magnifying glass (or Ctrl+F, Cmd+F on Mac). Matches are highlighted; Enter and Shift+Enter go to the next and previous match; Esc closes.
-- **Print:** in the **⋯ More** menu (or Ctrl+P, Cmd+P). Prints what a saved copy would contain, including your drawings, text, signatures and form answers. On computers, pages print at 300 dots per inch. On Android, it opens Android's own print screen: choose your printer (or **Save as PDF**), copies and pages there. Password-protected PDFs print without your changes.
+- **Print:** in the **⋯ More** menu (or Ctrl+P, Cmd+P). Prints what a saved copy would contain, including your drawings, text, signatures and form answers. On computers, pages print at 300 dots per inch. On Android, it opens Android's own print screen: choose your printer (or **Save as PDF**), copies and pages there.
 - **Organize pages:** in the **⋯ More** menu. A grid of page previews: tap pages to select them (Shift-click for a range), then **Rotate left/right**, **Delete**, or **Save as new PDF** (just the selected pages). Drag pages to reorder them; on a phone, press and hold a page, then drag. Drawings, text and signatures stay with their page and turn with it. Everything can be undone.
 - **Add pages from another PDF:** in the **⋯ More** menu or the Organize screen. Adds all pages of one or more files to the end. Save then makes one combined file. (Fillable form fields are locked into the pages when pages are reorganized or combined.)
 - **Sign:** click **Sign** to open the Sign panel with your **signature** and **initials**. The first time, tap "+ Add signature" or "+ Add initials" and draw them (they're saved only on this device). After that, tap one to place it, or use **Draw new** or **Remove**. A placed signature appears in the middle of the page you're viewing: drag it to move, drag the round corner to resize, and tap × (or press Delete) to remove it.
-- **Save:** click **Save** (or Ctrl+S, Cmd+S on Mac) to save a copy named "name-edited.pdf" with everything you added locked into the pages. The original file is never changed. In Chrome on a computer you choose where to save it; on phones it goes to Downloads. Encrypted (password-protected) PDFs can't be saved with changes yet.
+- **Save:** click **Save** (or Ctrl+S, Cmd+S on Mac) to save a copy named "name-edited.pdf" with everything you added locked into the pages. The original file is never changed. In Chrome on a computer you choose where to save it; on phones it goes to Downloads.
+- **Password-protected PDFs:** open them with the password, then sign, draw or type as usual. When you save, the app asks whether the copy should **keep the same password** or be saved **without a password**. PDFs that open without a password but are marked "no changes allowed" can be signed and saved too; the copy keeps the same marks. The password is only kept in memory while the file is open.
 - **Undo / Redo:** the buttons, or Ctrl+Z and Ctrl+Y (Cmd+Z and Cmd+Shift+Z on Mac).
 
 ## For developers
@@ -116,6 +117,7 @@ src/
   vendor/              form-field styles copied from PDF.js (Apache 2.0)
   save/
     save-pdf.ts        writes additions into a copy of the PDF (pdf-lib), exactly where they were drawn
+    protection.ts      unlocks password-protected PDFs for saving, and locks the copy the same way (qpdf)
     save-file.ts       the "Save as" window, or Downloads where there isn't one
   ui/toast.ts          short messages near the bottom of the screen
   viewer/
@@ -140,6 +142,7 @@ tests/
   e2e/roundc.test.cjs    browser tests for organizing, merging and splitting
   e2e/edit.test.cjs      browser tests for editing the PDF's own text
   e2e/contents.test.cjs  browser tests for the chapter list
+  e2e/protected.test.cjs browser tests for saving and printing password-protected PDFs
   e2e/android-print.test.cjs  browser tests for printing in the Android app (with a stand-in for Android's print screen)
   fixtures/              sample PDFs used by the tests
 ```
@@ -173,9 +176,10 @@ node tests/e2e/roundb.test.cjs
 node tests/e2e/roundc.test.cjs
 node tests/e2e/edit.test.cjs
 node tests/e2e/contents.test.cjs
+node tests/e2e/protected.test.cjs        # needs pypdf and pdftoppm (poppler)
 node tests/e2e/android-print.test.cjs   # needs pypdf and pdftoppm (poppler)
 ```
 
 ## License
 
-MIT. See [LICENSE](LICENSE). Uses [PDF.js](https://github.com/mozilla/pdf.js) (Apache 2.0), [pdf-lib](https://github.com/Hopding/pdf-lib) (MIT) and the [Arimo, Tinos and Cousine](https://github.com/googlefonts/) fonts (SIL Open Font License 1.1).
+MIT. See [LICENSE](LICENSE). Uses [PDF.js](https://github.com/mozilla/pdf.js) (Apache 2.0), [pdf-lib](https://github.com/Hopding/pdf-lib) (MIT), [qpdf](https://github.com/qpdf/qpdf) (Apache 2.0, built for the browser by [qpdf-wasm](https://github.com/neslinesli93/qpdf-wasm), ISC) and the [Arimo, Tinos and Cousine](https://github.com/googlefonts/) fonts (SIL Open Font License 1.1).

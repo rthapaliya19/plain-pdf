@@ -294,9 +294,9 @@ function pypdf(code, file) {
   await drag(page, [pg.x + 100, pg.y + 300], [pg.x + 300, pg.y + 320]);
   await page.click("button.save-button");
   await page.waitForSelector("dialog[open]");
-  check("encrypted file: explains it can't save yet", (await page.textContent("dialog[open] h2")) === "Can't save this file yet");
-  await page.click("dialog[open] >> text=OK");
-  check("encrypted file: drawing is kept", (await count(page, ".layer-ink path")) === 1);
+  check("encrypted file: asks whether the copy keeps the password", (await page.textContent("dialog[open] h2")) === "Keep the password?");
+  await page.click("dialog[open] >> text=Cancel");
+  check("encrypted file: Cancel keeps the drawing (more in protected.test.cjs)", (await count(page, ".layer-ink path")) === 1);
 
   check("desktop: no privacy-lock violations", (await page.evaluate(() => window.__csp)).length === 0);
   check("desktop: no errors or warnings", problems.filter((p) => !p.includes("Couldn't")).length === 0, problems.join(" | "));

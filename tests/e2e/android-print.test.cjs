@@ -15,12 +15,13 @@ const pdf = (name) => join(__dirname, "..", "fixtures", name);
 const results = [];
 const check = (name, ok, extra = "") => results.push(`${ok ? "PASS" : "FAIL"}  ${name}${extra ? "  (" + extra + ")" : ""}`);
 
-async function watch(page, label, { refuse = false } = {}) {
+async function watch(page, label, { refuse = false, allowed = [] } = {}) {
   const problems = [];
   page.on("pageerror", (e) => problems.push(`[${label}] pageerror: ${e.message}`));
   page.on("console", (m) => {
     // The app reports a refused printout on purpose in the "refuses" test.
-    if ((m.type() === "error" || m.type() === "warning") && !(refuse && /Couldn't start printing/.test(m.text()))) problems.push(`[${label}] console.${m.type()}: ${m.text()}`);
+    const expected = (refuse && /Couldn't start printing/.test(m.text())) || allowed.some((a) => a.test(m.text()));
+    if ((m.type() === "error" || m.type() === "warning") && !expected) problems.push(`[${label}] console.${m.type()}: ${m.text()}`);
   });
   await page.addInitScript((refuse) => {
     window.__csp = [];
@@ -155,37 +156,25 @@ function redPixels(file, frac) {
   job = await printFromMenu(page, 5);
   check("a large file arrives whole, in pieces", Buffer.from(job.bytes).equals(big) && job.pieces === 6, `${job.pieces} pieces, ${job.bytes.length} bytes`);
 
-  // 6. Password-protected: page pictures, without the changes, after asking.
+  // 6. Password-protected: handed over unlocked (Android's print screen can't open locked files), with the changes.
   await page.setInputFiles("input[type=file]", pdf("locked-password-secret123.pdf"));
   await page.waitForSelector("dialog[open] input[type=password]");
   await page.fill("dialog input[type=password]", "secret123");
   await page.keyboard.press("Enter");
   await page.waitForFunction(() => document.querySelector(".file-name")?.textContent === "locked-password-secret123.pdf");
   await page.waitForSelector(".page-canvas");
+  job = await printFromMenu(page, 6);
+  check("password-protected file: handed over unlocked, as real text", pypdf("print(r.is_encrypted, 'lease agreement' in r.pages[0].extract_text())", job.file) === "False True");
+  check("...under its own name when nothing was changed", job.name === "locked-password-secret123.pdf", job.name);
   const lpg = await box(page, '.page[data-page="1"]');
   await page.click('button[aria-label="Draw"]');
+  await page.click('button[aria-label="Red pen"]');
+  await page.click('button[aria-label="Thick line"]');
   await drag(page, [lpg.x + 100, lpg.y + 300], [lpg.x + 300, lpg.y + 320]);
   await page.click(".draw-options .done-button");
-  await page.click('button[aria-label="More"]');
-  await page.click(".menu-item >> text=Print");
-  await page.waitForSelector("dialog[open] >> text=Print without your changes?");
-  check("password-protected file with changes: asks first", true);
-  await page.click("dialog[open] >> text=Cancel");
-  await page.waitForTimeout(300);
-  check("...Cancel prints nothing", (await page.evaluate(() => window.__jobs.length)) === 5 && (await page.isHidden(".busy")));
-  await page.click('button[aria-label="More"]');
-  await page.click(".menu-item >> text=Print");
-  await page.click("dialog[open] >> text=Print without changes");
-  await page.waitForFunction(() => window.__jobs.length === 6, null, { timeout: 60000 });
-  job = await page.evaluate(() => window.__jobs[5]);
-  const lockedFile = join(SHOTS, "android-print-locked.pdf");
-  writeFileSync(lockedFile, Buffer.from(job.bytes));
-  const info = JSON.parse(pypdf("import json\np = r.pages[0]\nprint(json.dumps({'enc': r.is_encrypted, 'n': len(r.pages), 'imgs': len(p.images), 'w': float(p.mediabox.width), 'h': float(p.mediabox.height), 'iw': p.images[0].image.width if p.images else 0}))", lockedFile));
-  const lockedSize = JSON.parse(execFileSync("python3", ["-I", "-c", "import sys,json\nfrom pypdf import PdfReader\nr = PdfReader(sys.argv[1])\nr.decrypt('secret123')\np = r.pages[0]\nprint(json.dumps({'n': len(r.pages), 'w': float(p.mediabox.width), 'h': float(p.mediabox.height)}))", pdf("locked-password-secret123.pdf")]).toString());
-  check("...then prints it as page pictures, unlocked so Android can read it", !info.enc && info.imgs === 1 && info.n === lockedSize.n, JSON.stringify(info));
-  check("...at the page's own size", Math.abs(info.w - lockedSize.w) < 1 && Math.abs(info.h - lockedSize.h) < 1, `${info.w}x${info.h}`);
-  check("...sharp (300 dots per inch)", Math.abs(info.iw - (lockedSize.w * 300) / 72) < 3, `${info.iw} pixels wide`);
-  check("...named after the file", job.name === "locked-password-secret123.pdf", job.name);
+  job = await printFromMenu(page, 7);
+  check("...and with your changes, without asking", (await page.locator("dialog[open]").count()) === 0 && pypdf("print(r.is_encrypted)", job.file) === "False" && redPixels(job.file, { x0: 0, y0: 0, x1: 1, y1: 1 }) > 100);
+  check("...named like the saved copy", job.name === "locked-password-secret123-edited.pdf", job.name);
   check("no browser print window at any point", (await page.evaluate(() => window.__browserPrints)) === 0);
   check("desktop: no privacy-lock violations", (await page.evaluate(() => window.__csp)).length === 0);
   check("desktop: no errors or warnings", problems.length === 0, problems.join(" | "));
@@ -207,6 +196,43 @@ function redPixels(file, frac) {
   check("...and nothing is left on screen", (await r.isHidden(".busy")) && (await r.locator("dialog[open]").count()) === 0);
   check("refuses: no other errors", rp.length === 0, rp.join(" | "));
   await rctx.close();
+
+  // 7b. If unlocking can't load: page pictures, without the changes, after asking.
+  const bctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
+  await bctx.route(/qpdf.*\.wasm/, (route) => route.abort());
+  const bl = await bctx.newPage();
+  const bp = await watch(bl, "blocked", { allowed: [/Failed to load resource/, /falling back to ArrayBuffer instantiation/, /ProtectionError|qpdf|wasm|both async and sync fetching/i] });
+  await bl.goto(APP);
+  await bl.setInputFiles("input[type=file]", pdf("locked-password-secret123.pdf"));
+  await bl.waitForSelector("dialog[open] input[type=password]");
+  await bl.fill("dialog input[type=password]", "secret123");
+  await bl.keyboard.press("Enter");
+  await bl.waitForSelector(".page-canvas");
+  const bpg = await box(bl, '.page[data-page="1"]');
+  await bl.click('button[aria-label="Draw"]');
+  await drag(bl, [bpg.x + 100, bpg.y + 300], [bpg.x + 300, bpg.y + 320]);
+  await bl.click(".draw-options .done-button");
+  await bl.click('button[aria-label="More"]');
+  await bl.click(".menu-item >> text=Print");
+  await bl.waitForSelector("dialog[open] >> text=Print without your changes?", { timeout: 30000 });
+  check("if unlocking fails: asks before printing without the changes", true);
+  await bl.click("dialog[open] >> text=Cancel");
+  await bl.waitForTimeout(300);
+  check("...Cancel prints nothing", (await bl.evaluate(() => window.__jobs.length)) === 0 && (await bl.isHidden(".busy")));
+  await bl.click('button[aria-label="More"]');
+  await bl.click(".menu-item >> text=Print");
+  await bl.click("dialog[open] >> text=Print without changes");
+  await bl.waitForFunction(() => window.__jobs.length === 1, null, { timeout: 60000 });
+  const pjob = await bl.evaluate(() => window.__jobs[0]);
+  const lockedFile = join(SHOTS, "android-print-locked.pdf");
+  writeFileSync(lockedFile, Buffer.from(pjob.bytes));
+  const info = JSON.parse(pypdf("import json\np = r.pages[0]\nprint(json.dumps({'enc': r.is_encrypted, 'n': len(r.pages), 'imgs': len(p.images), 'w': float(p.mediabox.width), 'h': float(p.mediabox.height), 'iw': p.images[0].image.width if p.images else 0}))", lockedFile));
+  check("...then prints page pictures, unlocked so Android can read them", !info.enc && info.imgs === 1 && info.n === 1, JSON.stringify(info));
+  check("...at the page's own size", Math.abs(info.w - 612) < 1 && Math.abs(info.h - 792) < 1, `${info.w}x${info.h}`);
+  check("...sharp (300 dots per inch)", Math.abs(info.iw - (612 * 300) / 72) < 3, `${info.iw} pixels wide`);
+  check("...named after the file", pjob.name === "locked-password-secret123.pdf", pjob.name);
+  check("blocked: no other errors", bp.length === 0, bp.join(" | "));
+  await bctx.close();
 
   // 8. Phone (Pixel size): Print is in the More menu, without a keyboard shortcut.
   const mctx = await browser.newContext({ ...devices["Pixel 7"] });

@@ -82,8 +82,12 @@ export interface PdfDocument {
   readonly pageCount: number;
   /** Page sizes, in order. Index 0 is page 1. */
   readonly pageSizes: readonly PageSize[];
-  /** True if the file is encrypted (for example password-protected). */
+  /** True if the file is encrypted: it needs a password to open, or is marked "no changes allowed". */
   readonly encrypted: boolean;
+  /** True if it needed a password to open. */
+  readonly passwordProtected: boolean;
+  /** The password it was opened with ("" if none). Kept only in memory while the file is open. */
+  readonly password: string;
   /**
    * For each page, the transform from the app's page coordinates (points,
    * top-left origin, rotation applied) to the PDF file's own coordinates.
@@ -165,12 +169,14 @@ export async function openPdf(bytes: Uint8Array, askPassword: PasswordPrompt): P
   });
 
   let cancelled = false;
+  let typed: string | null = null;
   task.onPassword = (updatePassword: (password: string) => void, reason: number) => {
     askPassword(reason === PasswordResponses.INCORRECT_PASSWORD).then((password) => {
       if (password === null) {
         cancelled = true;
         void task.destroy();
       } else {
+        typed = password;
         updatePassword(password);
       }
     });
@@ -214,6 +220,8 @@ export async function openPdf(bytes: Uint8Array, askPassword: PasswordPrompt): P
     pageCount: doc.numPages,
     pageSizes,
     encrypted,
+    passwordProtected: typed !== null,
+    password: typed ?? "",
     pageToPdf,
     renderPage(index, canvas, pixelsPerPoint, rotation = 0) {
       const page = pages[index];
