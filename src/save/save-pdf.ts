@@ -49,6 +49,7 @@ import {
   contentSize,
   type Addition,
   type PlacedSignature,
+  type Redaction,
   type Stroke,
   type TextBox,
   type TextEdit,
@@ -56,6 +57,26 @@ import {
 } from "../core/additions";
 import type { FontStyle } from "../core/fonts";
 import type { Matrix } from "../core/pdf-engine";
+import { redactPage, replaceWithPicture, type Area } from "./redact";
+
+/** A shown-page rectangle (points, top-left origin) and the colour it's painted. */
+export interface PaintedRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  color: string;
+}
+
+export interface RedactionOptions {
+  /**
+   * A picture of page `index` as shown, with `rects` painted in, for pages
+   * whose content can't be changed safely when redacting.
+   */
+  pagePicture?: (index: number, rects: PaintedRect[]) => Promise<{ jpeg: Uint8Array; width: number; height: number }>;
+  /** Told about each page that was saved as a picture. */
+  onPicture?: (index: number, reason: string) => void;
+}
 
 export class EncryptedPdfError extends Error {
   constructor() {
@@ -68,7 +89,7 @@ export async function saveWithAdditions(
   original: Uint8Array,
   additions: Addition[],
   pageToPdf: readonly Matrix[],
-  options: { lockForms?: boolean } = {},
+  options: { lockForms?: boolean } & RedactionOptions = {},
 ): Promise<Uint8Array> {
   let doc: PDFDocument;
   try {
@@ -82,7 +103,7 @@ export async function saveWithAdditions(
 
   if (options.lockForms) lockFormAnswers(doc);
 
-  await drawAdditions(doc, additions, pageToPdf);
+  await drawAdditions(doc, additions, pageToPdf, options);
   return doc.save();
 }
 
@@ -97,6 +118,7 @@ export async function saveWorkspace(
   plan: readonly { source: number; index: number; rotation: number }[],
   additions: Addition[],
   pageToPdf: readonly Matrix[],
+  options: RedactionOptions = {},
 ): Promise<Uint8Array> {
   const docs: PDFDocument[] = [];
   for (const source of sources) {
@@ -126,7 +148,7 @@ export async function saveWorkspace(
     page.setRotation(degrees((((page.getRotation().angle + entry.rotation) % 360) + 360) % 360));
     out.addPage(page);
   }
-  await drawAdditions(out, additions, pageToPdf);
+  await drawAdditions(out, additions, pageToPdf, options);
   return out.save();
 }
 
@@ -150,8 +172,34 @@ function copyDetails(from: PDFDocument, to: PDFDocument): void {
   if (modified) to.setModificationDate(modified);
 }
 
+/**
+ * The areas to clear on a page, in its PDF coordinates: redaction boxes (black)
+ * and the patches over edited words (paper colour).
+ */
+function clearedRects(items: Addition[]): PaintedRect[] {
+  const rects: PaintedRect[] = [];
+  for (const a of items) {
+    if (a.kind === "redact") rects.push({ x: a.x, y: a.y, w: a.width, h: a.height, color: "#000000" });
+    else if (a.kind === "edit") rects.push({ ...a.cover, color: a.coverColor });
+  }
+  return rects;
+}
+
+function toArea(r: PaintedRect, toPdf: Matrix): Area {
+  const [a, b, c, d, e, f] = toPdf;
+  const corners = [
+    [r.x, r.y],
+    [r.x + r.w, r.y],
+    [r.x, r.y + r.h],
+    [r.x + r.w, r.y + r.h],
+  ].map(([x, y]) => [a * x + c * y + e, b * x + d * y + f]);
+  const xs = corners.map((p) => p[0]);
+  const ys = corners.map((p) => p[1]);
+  return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys), color: rgb(r.color) };
+}
+
 /** Draws every addition onto its page. `pageToPdf[i]` places page i's additions. */
-async function drawAdditions(doc: PDFDocument, additions: Addition[], pageToPdf: readonly Matrix[]): Promise<void> {
+async function drawAdditions(doc: PDFDocument, additions: Addition[], pageToPdf: readonly Matrix[], options: RedactionOptions = {}): Promise<void> {
   const pages = doc.getPages();
   const fonts = fontCache(doc);
   // Typed text uses Helvetica, a font every PDF reader has built in.
@@ -166,6 +214,16 @@ async function drawAdditions(doc: PDFDocument, additions: Addition[], pageToPdf:
     const page = pages[index];
     if (!page) continue;
     items.sort((a, b) => a.order - b.order);
+    // First, remove for good whatever lies under redaction boxes and edit patches.
+    const cleared = clearedRects(items);
+    if (cleared.length > 0) {
+      const result = await redactPage(doc, page, cleared.map((r) => toArea(r, pageToPdf[index])));
+      if (!result.ok) {
+        if (!options.pagePicture) throw new Error(`Page ${index + 1} can't be redacted: ${result.reason}`);
+        await replaceWithPicture(doc, page, pageToPdf[index], await options.pagePicture(index, cleared));
+        options.onPicture?.(index, result.reason);
+      }
+    }
     // Same layering as on screen: edited text first, then highlights, then ink on top.
     const edits = items.filter((a): a is TextEdit => a.kind === "edit");
     const highlights = items.filter((a) => a.kind === "highlight" || (a.kind === "stroke" && a.tool === "highlighter"));
@@ -282,7 +340,13 @@ function multiplyBlend(doc: PDFDocument, page: PDFPage): PDFName {
 function drawAddition(item: Exclude<Addition, TextBox | TextEdit>): PDFOperator[] {
   if (item.kind === "stroke") return drawStroke(item);
   if (item.kind === "highlight") return drawHighlight(item);
+  if (item.kind === "redact") return drawRedaction(item);
   return drawSignature(item);
+}
+
+/** A solid black box. */
+function drawRedaction(r: Redaction): PDFOperator[] {
+  return [pushGraphicsState(), setFillingRgbColor(0, 0, 0), rectangle(r.x, r.y, r.width, r.height), fill(), popGraphicsState()];
 }
 
 /**

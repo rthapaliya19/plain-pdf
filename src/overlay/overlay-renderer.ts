@@ -15,6 +15,7 @@ import {
   contentSize,
   type Additions,
   type PlacedSignature,
+  type Redaction,
   type Stroke,
   type TextBox,
   type TextEdit,
@@ -37,8 +38,8 @@ interface Layers {
   overlay: HTMLDivElement;
 }
 
-/** Additions you can tap, drag and remove: signatures, initials and text. */
-type Movable = PlacedSignature | TextBox;
+/** Additions you can tap, drag and remove: signatures, initials, text and redaction boxes. */
+type Movable = PlacedSignature | TextBox | Redaction;
 /** Additions that get a tappable box (edits can be selected and removed, not dragged). */
 type Boxed = Movable | TextEdit;
 
@@ -113,8 +114,16 @@ export class OverlayRenderer {
   preview(item: Movable): void {
     const layers = this.layers.get(item.page);
     if (!layers) return;
-    const transform = item.kind === "signature" ? signatureTransform(item) : textTransform(item);
-    layers.ink.querySelector(`g[data-id="${item.id}"]`)?.setAttribute("transform", transform);
+    if (item.kind === "redact") {
+      const rect = layers.ink.querySelector(`rect[data-id="${item.id}"]`);
+      rect?.setAttribute("x", String(item.x));
+      rect?.setAttribute("y", String(item.y));
+      rect?.setAttribute("width", String(item.width));
+      rect?.setAttribute("height", String(item.height));
+    } else {
+      const transform = item.kind === "signature" ? signatureTransform(item) : textTransform(item);
+      layers.ink.querySelector(`g[data-id="${item.id}"]`)?.setAttribute("transform", transform);
+    }
     const box = layers.boxes.querySelector<HTMLElement>(`.sig-box[data-id="${item.id}"]`);
     if (box) placeBox(box, item, this.viewer.pageSize(item.page));
   }
@@ -158,6 +167,10 @@ export class OverlayRenderer {
       } else if (item.kind === "edit") {
         element = editGroup(item);
         layer = layers.edits;
+        layers.boxes.append(itemBox(item, size, item.id === this.selectedId));
+      } else if (item.kind === "redact") {
+        element = redactionRect(item);
+        layer = layers.ink;
         layers.boxes.append(itemBox(item, size, item.id === this.selectedId));
       } else {
         element = signatureGroup(item);
@@ -281,6 +294,19 @@ function placeBox(box: HTMLElement, sig: Boxed, page: { width: number; height: n
   box.style.height = `${(sig.height / page.height) * 100}%`;
 }
 
+/** A solid black box (what's under it is removed when a copy is saved). */
+function redactionRect(r: Redaction): SVGRectElement {
+  const rect = document.createElementNS(SVG_NS, "rect");
+  rect.dataset.id = r.id;
+  rect.dataset.kind = r.kind;
+  rect.setAttribute("x", String(r.x));
+  rect.setAttribute("y", String(r.y));
+  rect.setAttribute("width", String(r.width));
+  rect.setAttribute("height", String(r.height));
+  rect.setAttribute("fill", "#000000");
+  return rect;
+}
+
 /** The patch over the old words, then the new words in a matching style. */
 function editGroup(e: TextEdit): SVGGElement {
   const g = document.createElementNS(SVG_NS, "g");
@@ -315,17 +341,19 @@ function editGroup(e: TextEdit): SVGGElement {
 
 function itemBox(item: Boxed, page: { width: number; height: number }, selected: boolean): HTMLDivElement {
   const box = document.createElement("div");
-  const kindClass = item.kind === "text" ? " text-box" : item.kind === "edit" ? " text-box edit-box" : "";
+  const kindClass = item.kind === "text" ? " text-box" : item.kind === "edit" ? " text-box edit-box" : item.kind === "redact" ? " redact-box" : "";
   box.className = `sig-box${kindClass}${selected ? " selected" : ""}`;
   box.dataset.id = item.id;
-  const name = item.kind === "text" ? "Text" : item.kind === "edit" ? "Edit" : item.role === "initials" ? "Initials" : "Signature";
+  const name = item.kind === "text" ? "Text" : item.kind === "edit" ? "Edit" : item.kind === "redact" ? "Redaction" : item.role === "initials" ? "Initials" : "Signature";
   box.setAttribute(
     "aria-label",
     item.kind === "text"
       ? "Text. Drag to move, double-click to edit."
       : item.kind === "edit"
         ? "Edited text. Double-click to change it; × undoes the edit."
-        : `${name}. Drag to move.`,
+        : item.kind === "redact"
+          ? "Redaction: what's under it is removed when you save. Drag to move, drag the corner to resize."
+          : `${name}. Drag to move.`,
   );
   placeBox(box, item, page);
 
@@ -337,7 +365,7 @@ function itemBox(item: Boxed, page: { width: number; height: number }, selected:
   remove.textContent = "×";
   box.append(remove);
 
-  if (item.kind === "signature") {
+  if (item.kind === "signature" || item.kind === "redact") {
     const handle = document.createElement("div");
     handle.className = "sig-handle";
     handle.title = "Drag to resize";

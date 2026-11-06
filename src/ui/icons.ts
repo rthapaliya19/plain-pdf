@@ -27,6 +27,7 @@ export const icons = {
   rotateRight: svg('<path d="M20 4v5h-5"/><path d="M19.4 14a8 8 0 1 1-1.8-7.2L20 9"/>'),
   trash: svg('<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/>'),
   undo: svg('<path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>'),
+  redact: svg('<rect x="3" y="9" width="18" height="6" rx="1" fill="currentColor"/><path d="M3 5h18M3 19h12"/>'),
   contents: svg('<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1" fill="currentColor"/><circle cx="4.5" cy="12" r="1" fill="currentColor"/><circle cx="4.5" cy="18" r="1" fill="currentColor"/>'),
   chevron: svg('<path d="M9 6l6 6-6 6"/>'),
   redo: svg('<path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/>'),

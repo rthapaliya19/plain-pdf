@@ -286,7 +286,11 @@ input:focus-visible {
   pointer-events: none;
 }
 
-/* While drawing or adding text, selectable text, form fields and links don't react. */
+/* While drawing, adding text or redacting, selectable text, form fields and links don't react. */
+.viewer.redacting .textLayer,
+.viewer.redacting .textLayer *,
+.viewer.redacting .annotationLayer,
+.viewer.redacting .annotationLayer *,
 .viewer.drawing .textLayer,
 .viewer.drawing .textLayer *,
 .viewer.texting .textLayer,
@@ -1629,4 +1633,39 @@ input:focus-visible {
   .contents-toggle {
     width: 36px;
   }
+}
+
+/* ---------- Redact ---------- */
+
+.viewer.redacting {
+  /* The app handles fingers itself: one draws a box, two scroll and zoom. */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.viewer.redacting .page {
+  cursor: crosshair;
+}
+
+.redact-preview {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+  background: rgb(0 0 0 / 0.55);
+  outline: 2px dashed #ffffff;
+  outline-offset: -2px;
+}
+
+.redact-label {
+  padding: 0 8px 0 10px;
+  color: var(--muted);
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+/* A selected black box: a bright outline so it's visible. */
+.sig-box.redact-box.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }

@@ -8,12 +8,13 @@ import { History } from "./core/history";
 import { NotAPdfError, PasswordCancelledError, openPdf, type PdfDocument } from "./core/pdf-engine";
 import { TextLayoutCache } from "./core/text-layout";
 import { appendPages, deletePages, movePages, pickPages, rotatePages, samePlan, type PagesState } from "./core/page-ops";
-import { firstPlan, isUnchanged, workspaceDocument, type PageEntry, type Source } from "./core/workspace";
+import { firstPlan, isUnchanged, workspaceDocument, type PageEntry, type PagePlan, type Source } from "./core/workspace";
 import { ToolManager } from "./core/tools";
 import { OverlayRenderer } from "./overlay/overlay-renderer";
 import { DrawTool } from "./tools/draw/draw-tool";
 import { SignatureController } from "./tools/sign/signature-controller";
 import { TextTool } from "./tools/text/text-tool";
+import { RedactTool } from "./tools/redact/redact-tool";
 import { printDocument, printablePictures } from "./tools/print/print";
 import { Search } from "./tools/search/search";
 import { OrganizeScreen } from "./tools/organize/organize-screen";
@@ -25,6 +26,7 @@ import {
   watchSystemOpenRequests,
 } from "./platform/native";
 import { canPrintWithAndroid, printWithAndroid } from "./platform/android-print";
+import type { RedactionOptions } from "./save/save-pdf";
 import { chooseSaveTarget, editedName } from "./save/save-file";
 import { askChoice, askConfirm, askPassword, showMessage } from "./ui/dialog";
 import { showToast } from "./ui/toast";
@@ -77,6 +79,8 @@ export class App {
       this.tools.deactivate(),
     );
     this.tools.register(textTool);
+    const redactTool = new RedactTool(this.viewer, this.additions, this.history, renderer, () => this.tools.deactivate());
+    this.tools.register(redactTool);
     const signatures = new SignatureController(this.viewer, this.additions, this.history, renderer, this.hub, (item) => {
       this.tools.activate("text");
       textTool.edit(item);
@@ -157,6 +161,7 @@ export class App {
       if (isNativeApp) void openManyWithSystemDialog().then((files) => this.addPagesFromFiles(files));
       else this.organize.chooseFilesToAdd();
     });
+    this.toolbar.moreMenu.add(icons.redact, "Redact", "", () => this.tools.activate("redact"));
     // Print is in the More menu. (The Android app prints through Android's own print screen.)
     if (!isAndroidApp || canPrintWithAndroid()) {
       this.toolbar.moreMenu.add(icons.print, "Print", isAndroidApp ? "" : isMac() ? "⌘P" : "Ctrl+P", () => void this.print());
@@ -169,6 +174,7 @@ export class App {
       this.contents.element,
       drawTool.options.element,
       textTool.options.element,
+      redactTool.options,
       this.startScreen,
       this.busy,
       this.dropHint,
@@ -307,11 +313,15 @@ export class App {
     this.busy.querySelector("p")!.textContent = "Saving a copy…";
     this.busy.hidden = false;
     try {
-      const bytes = await this.buildCopy(file, this.pagesState(file), protection);
+      const pictured: number[] = [];
+      const bytes = await this.buildCopy(file, this.pagesState(file), protection, pictured);
       await target.write(bytes);
       if (this.current === file) this.dirty = false;
       const where = target.kind === "file" ? `Saved a copy: ${target.name}` : `Saved a copy to your Downloads: ${target.name}`;
-      showToast(file.doc.passwordProtected && protection === "keep" ? `${where} (same password)` : where, 5000);
+      showToast(
+        (file.doc.passwordProtected && protection === "keep" ? `${where} (same password)` : where) + picturedNote(pictured),
+        pictured.length ? 9000 : 5000,
+      );
     } catch (error) {
       console.error(error);
       await showMessage("Couldn't save", saveProblem(error, "Something went wrong while saving."));
@@ -326,20 +336,57 @@ export class App {
    * If the opened file is password-protected or marked "no changes allowed",
    * `protection` says whether the copy is locked the same way ("keep") or not.
    */
-  private async buildCopy(file: OpenFile, state: PagesState = this.pagesState(file), protection: Protection = "remove"): Promise<Uint8Array> {
+  private async buildCopy(
+    file: OpenFile,
+    state: PagesState = this.pagesState(file),
+    protection: Protection = "remove",
+    /** Filled with pages that had to be saved as pictures for redaction. */
+    pictured: number[] = [],
+  ): Promise<Uint8Array> {
     // The saving code (pdf-lib) is only loaded the first time it's needed.
     const { saveWithAdditions, saveWorkspace } = await import("./save/save-pdf");
+    const redaction = this.redactionHelpers(file, state.plan, pictured);
     let bytes: Uint8Array;
     if (isUnchanged(file.sources, state.plan)) {
       const base = await this.unlockedBytes(file.sources[0]);
-      bytes = await saveWithAdditions(base, state.additions, file.doc.pageToPdf, { lockForms: file.doc.formsModified });
+      bytes = await saveWithAdditions(base, state.additions, file.doc.pageToPdf, { lockForms: file.doc.formsModified, ...redaction });
     } else {
       // Pages were reorganized or added: build a new file from the page list.
       const sources = await Promise.all(file.sources.map(async (s) => ({ bytes: await this.unlockedBytes(s) })));
       const placed = workspaceDocument(file.sources, state.plan);
-      bytes = await saveWorkspace(sources, state.plan, state.additions, placed.pageToPdf);
+      bytes = await saveWorkspace(sources, state.plan, state.additions, placed.pageToPdf, redaction);
     }
     return this.protect(file, bytes, protection);
+  }
+
+  /**
+   * For redaction: pictures of pages whose content can't be changed safely
+   * (drawn as shown, with the boxes painted in), and a list of those pages.
+   */
+  private redactionHelpers(file: OpenFile, plan: PagePlan, pictured: number[]): RedactionOptions {
+    return {
+      pagePicture: async (index, rects) => {
+        const doc = workspaceDocument(file.sources, plan);
+        const size = doc.pageSizes[index];
+        const ppp = Math.min(300 / 72, Math.sqrt(12_000_000 / (size.width * size.height)));
+        const canvas = await doc.renderForPrint(index, ppp);
+        const g = canvas.getContext("2d")!;
+        const sx = canvas.width / size.width;
+        const sy = canvas.height / size.height;
+        for (const r of rects) {
+          g.fillStyle = r.color;
+          g.fillRect(Math.floor(r.x * sx), Math.floor(r.y * sy), Math.ceil(r.w * sx) + 1, Math.ceil(r.h * sy) + 1);
+        }
+        const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+        canvas.width = canvas.height = 0;
+        if (!blob) throw new Error("Couldn't make a picture of the page.");
+        return { jpeg: new Uint8Array(await blob.arrayBuffer()), width: size.width, height: size.height };
+      },
+      onPicture: (index, reason) => {
+        console.info(`Page ${index + 1} saved as a picture for redaction (${reason}).`);
+        pictured.push(index);
+      },
+    };
   }
 
   /** A file's bytes with its form answers written in, and unlocked if it's protected. */
@@ -484,9 +531,16 @@ export class App {
       const picked = pickPages(this.pagesState(file), pages);
       const { saveWorkspace } = await import("./save/save-pdf");
       const sources = await Promise.all(file.sources.map(async (s) => ({ bytes: await this.unlockedBytes(s) })));
-      const built = await saveWorkspace(sources, picked.plan, picked.additions, workspaceDocument(file.sources, picked.plan).pageToPdf);
+      const pictured: number[] = [];
+      const built = await saveWorkspace(
+        sources,
+        picked.plan,
+        picked.additions,
+        workspaceDocument(file.sources, picked.plan).pageToPdf,
+        this.redactionHelpers(file, picked.plan, pictured),
+      );
       await target.write(await this.protect(file, built, protection));
-      showToast(`Saved ${pages.length} page${pages.length === 1 ? "" : "s"} as ${target.name}`, 5000);
+      showToast(`Saved ${pages.length} page${pages.length === 1 ? "" : "s"} as ${target.name}${picturedNote(pictured)}`, pictured.length ? 9000 : 5000);
     } catch (error) {
       console.error(error);
       await showMessage("Couldn't save", saveProblem(error, "Something went wrong while saving the selected pages."));
@@ -703,5 +757,12 @@ function saveProblem(error: unknown, general: string): string {
     return "Plain PDF couldn't unlock this protected PDF to add your changes (it may use an unusual kind of protection). Your original file is unchanged, and your changes are still here.";
   }
   return `${general} Your original file is unchanged, and your changes are still here.`;
+}
+
+/** " Page 3 was saved as a picture..." when redaction needed it. */
+function picturedNote(pages: number[]): string {
+  if (pages.length === 0) return "";
+  const list = pages.map((p) => p + 1).join(", ");
+  return `. Page${pages.length === 1 ? "" : "s"} ${list} ${pages.length === 1 ? "was" : "were"} saved as a picture, to be sure everything under the black boxes is removed.`;
 }
 

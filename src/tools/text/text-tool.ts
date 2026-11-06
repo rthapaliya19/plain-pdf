@@ -324,7 +324,7 @@ export class TextTool implements Tool {
     if (!this.viewer.overlay(target.page)) return;
     this.editEditor = new EditEditor(this.viewer, this.renderer, target, () => this.commit());
     if (!target.existing && shouldShowEditHint()) {
-      showToast("Edited words cover the old ones. The old words are still in the file, so search or copy in other apps can find them.", 9000);
+      showToast("Edited words cover the old ones. When you save a copy, the old words are removed from it for good.", 9000);
     }
   }
 

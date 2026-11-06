@@ -84,8 +84,8 @@ export const TEXT_BASELINE = 0.9465;
 
 /**
  * Edited PDF text: a patch in the paper's colour covers the old words, and
- * the new words are written on top in a matching style. (The old words are
- * still in the file underneath, only hidden.)
+ * the new words are written on top in a matching style. When a copy is
+ * saved, the old words under the patch are removed from the file for good.
  */
 export interface TextEdit extends Base, FontStyle {
   kind: "edit";
@@ -111,7 +111,21 @@ export interface TextEdit extends Base, FontStyle {
   baselineOffset: number;
 }
 
-export type Addition = Stroke | TextHighlight | PlacedSignature | TextBox | TextEdit;
+/**
+ * A redaction box: shown and saved as a solid black box, and everything under
+ * it (words, pictures, shapes, links) is permanently removed from saved copies.
+ */
+export interface Redaction extends Base {
+  kind: "redact";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Kept for turning with its page (a box looks the same either way). */
+  turn?: number;
+}
+
+export type Addition = Stroke | TextHighlight | PlacedSignature | TextBox | TextEdit | Redaction;
 
 /** The transform [a, b, c, d, e, f] that places a box's content, turned clockwise by `turn`. */
 export function boxMatrix(x: number, y: number, w: number, h: number, turn = 0): [number, number, number, number, number, number] {

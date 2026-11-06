@@ -175,6 +175,11 @@ export class Viewer {
     this.element.classList.toggle("erasing", mode === "eraser");
   }
 
+  /** While the Redact tool is on, dragging on a page draws a redaction box. */
+  setRedactMode(on: boolean): void {
+    this.element.classList.toggle("redacting", on);
+  }
+
   /** While the Text tool is on, tapping a page places or edits text. */
   setTextMode(on: boolean): void {
     this.element.classList.toggle("texting", on);
