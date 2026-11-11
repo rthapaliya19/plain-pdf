@@ -161,3 +161,4 @@ Built in this order, each tried by the owner in the web preview, then one 1.3.0 
     picture with the boxes painted in, and the app says so.
 - [x] 1.3: owner approved the preview and asked to publish (2026-11-06)
 - [x] 1.3: 1.3.0 apps released for Windows, Mac and Android (2026-11-06)
+- [x] 1.3: owner installed 1.3.0; everything working so far (2026-11-11)
