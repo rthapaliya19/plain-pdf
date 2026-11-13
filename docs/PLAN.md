@@ -171,5 +171,5 @@ Built in this order, each tried by the owner in the web preview, then one 1.3.0 
 
 - [x] 1.3.1: built and tested (521 checks)
 - [x] 1.3.1: owner asked to release (2026-11-13)
-- [ ] 1.3.1: release 1.3.1 apps
+- [x] 1.3.1: 1.3.1 apps released for Windows, Mac and Android (2026-11-13)
 
