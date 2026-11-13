@@ -125,9 +125,12 @@ function pypdf(code, file) {
   await page.reload();
   await openFile(page, pdf("sample-25-pages.pdf"));
 
-  check("Save button shown, disabled until something is added", (await page.isVisible("button.save-button")) && (await page.isDisabled("button.save-button")));
+  check("Save button shown and usable right away", (await page.isVisible("button.save-button")) && !(await page.isDisabled("button.save-button")));
   await page.keyboard.press("Control+s");
-  check("Ctrl+S with nothing added explains why", (await page.textContent(".toast"))?.includes("Nothing to save yet"));
+  await page.waitForFunction(() => window.__saves.length === 1 && window.__saves[0].bytes);
+  const plain = await page.evaluate(() => window.__saves[0]);
+  check("with nothing changed, Save keeps an exact copy under the same name", plain.name === "sample-25-pages.pdf" && Buffer.from(plain.bytes).equals(readFileSync(pdf("sample-25-pages.pdf"))), plain.name);
+  check("...and says so", (await page.textContent(".toast"))?.includes("Saved a copy: sample-25-pages.pdf"));
 
   // ----- Draw strip: Done button and pen-only thickness -----
   await page.click('button[aria-label="Draw"]');
@@ -157,7 +160,7 @@ function pypdf(code, file) {
     await drag(page, [pg.x + 520 * s, pg.y + 500 * s], [pg.x + 560 * s, pg.y + 560 * s]);
     return (await count(page, ".layer-ink path")) === before;
   })());
-  check("Save enabled once something is added", !(await page.isDisabled("button.save-button")));
+  check("Save still available once something is added", !(await page.isDisabled("button.save-button")));
 
   // ----- Sign panel with signature and initials -----
   await page.click('button[aria-label="Sign"]');
@@ -196,8 +199,8 @@ function pypdf(code, file) {
 
   // ----- Save -----
   await page.click("button.save-button");
-  await page.waitForFunction(() => window.__saves.length === 1 && window.__saves[0].bytes);
-  const saved1 = await page.evaluate(() => window.__saves[0].name);
+  await page.waitForFunction(() => window.__saves.length === 2 && window.__saves[1].bytes);
+  const saved1 = await page.evaluate(() => window.__saves[1].name);
   check("Save suggests name-edited.pdf", saved1 === "sample-25-pages-edited.pdf", saved1);
   await page.waitForSelector(".toast >> text=Saved a copy");
   check("confirms the save", (await page.textContent(".toast")).includes("sample-25-pages-edited.pdf"));
@@ -250,7 +253,7 @@ function pypdf(code, file) {
   }
   await page.click(".draw-options .done-button");
   await page.click("button.save-button");
-  await page.waitForFunction(() => window.__saves.length === 2 && window.__saves[1].bytes);
+  await page.waitForFunction(() => window.__saves.length === 3 && window.__saves[2].bytes);
   const file2 = join(SHOTS, "saved-geometry-edited.pdf");
   writeFileSync(file2, await savedBytes(page));
   await page.setInputFiles("input[type=file]", file2);
@@ -275,7 +278,7 @@ function pypdf(code, file) {
   await page.evaluate(() => (window.__cancelNextSave = true));
   await page.click("button.save-button");
   await page.waitForTimeout(400);
-  check("cancelling Save saves nothing", (await page.evaluate(() => window.__saves.length)) === 2);
+  check("cancelling Save saves nothing", (await page.evaluate(() => window.__saves.length)) === 3);
   await page.setInputFiles("input[type=file]", pdf("sample-25-pages.pdf"));
   await page.waitForSelector("dialog[open]");
   check("after cancelling, changes still count as unsaved", (await page.textContent("dialog[open] h2")) === "Discard your changes?");

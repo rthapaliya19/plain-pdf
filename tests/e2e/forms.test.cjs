@@ -73,7 +73,7 @@ const box = (page, sel) => page.$eval(sel, (el) => { const r = el.getBoundingCli
   await page.click(".annotationLayer textarea");
   await page.keyboard.type("Call after 5pm");
   await page.mouse.click(pg.x + 500 * s, pg.y + 100 * s); // click away
-  check("filling a form enables Save", !(await page.isDisabled("button.save-button")));
+  check("Save is available after filling a form", !(await page.isDisabled("button.save-button")));
   const shown = await page.evaluate(() => {
     const visible = (sel) => [...document.querySelectorAll(sel)].some((c) => getComputedStyle(c).display !== "none" && c.getBoundingClientRect().width > 0);
     return {

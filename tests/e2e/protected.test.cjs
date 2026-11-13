@@ -123,6 +123,12 @@ async function save(page, answer) {
 
   // ----- A file that needs a password -----
   await open(page, "locked-password-secret123.pdf", "secret123");
+  // Nothing changed yet: Save keeps the exact file (still locked) under its own name, or an unlocked copy.
+  let s0 = await save(page, "Keep password");
+  check("unchanged locked file: Keep password saves the exact file, same name", s0.name === "locked-password-secret123.pdf" && readFileSync(s0.file).equals(readFileSync(pdf("locked-password-secret123.pdf"))), s0.name);
+  s0 = await save(page, "Save without password");
+  const f0 = facts(s0.file, []);
+  check("...Save without password saves an unlocked copy, same name", !f0.locked && f0.text.includes("One page lease agreement") && s0.name === "locked-password-secret123.pdf", s0.name);
   await redLine(page);
   await page.click("button.save-button");
   await page.waitForSelector("dialog[open] >> text=Keep the password?");
@@ -130,9 +136,10 @@ async function save(page, answer) {
   await page.screenshot({ path: `${SHOTS}/protected-d1-question.png` });
   await page.click("dialog[open] >> text=Cancel");
   await page.waitForTimeout(300);
-  check("...Cancel saves nothing", (await page.evaluate(() => window.__saves.length)) === 0);
+  check("...Cancel saves nothing", (await page.evaluate(() => window.__saves.length)) === 2);
 
   let s = await save(page, "Keep password");
+  const keptFile = s.file;
   let f = facts(s.file, ["secret123"]);
   check("Keep password: the copy is locked with the same password", f.locked && f.opens.secret123 > 0 && s.name === "locked-password-secret123-edited.pdf", JSON.stringify({ ...f, text: undefined }));
   check("...with the original text", f.text.includes("One page lease agreement"));
@@ -147,14 +154,14 @@ async function save(page, answer) {
   check("the password isn't stored anywhere", !(await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }))).includes("secret123"));
 
   // Reopen the locked copy in the app: it asks for the same password.
-  const relocked = join(SHOTS, "protected-1-locked-password-secret123-edited.pdf");
+  const relocked = keptFile;
   await page.setInputFiles("input[type=file]", relocked);
   await page.waitForTimeout(300);
   if (await page.isVisible("dialog[open] >> text=Discard and open")) await page.click("dialog[open] >> text=Discard and open");
   await page.waitForSelector("dialog[open] input[type=password]");
   await page.fill("dialog input[type=password]", "secret123");
   await page.keyboard.press("Enter");
-  await page.waitForFunction(() => document.querySelector(".file-name")?.textContent === "protected-1-locked-password-secret123-edited.pdf");
+  await page.waitForFunction((n) => document.querySelector(".file-name")?.textContent === n, require("node:path").basename(keptFile));
   check("the locked copy opens in Plain PDF with the same password", true);
 
   // ----- Separate owner password, modern AES-256 lock -----

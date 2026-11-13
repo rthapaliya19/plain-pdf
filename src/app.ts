@@ -196,7 +196,6 @@ export class App {
 
     this.hub.on("additions:changed", () => {
       this.dirty = true;
-      this.toolbar.setSaveEnabled(this.hasChanges);
     });
 
     this.viewer.setLinkHandler({
@@ -271,7 +270,6 @@ export class App {
       this.dirty = false;
       this.watchForms(base);
       this.viewer.show(doc);
-      this.toolbar.setSaveEnabled(false);
       if (doc.isXfaForm) {
         showToast("This form uses an older Adobe format (XFA) that Plain PDF can't fill in.", 7000);
       }
@@ -293,30 +291,33 @@ export class App {
   }
 
   /**
-   * Saves a copy of the PDF with everything added locked into the pages.
-   * The original file is never changed.
+   * Saves a copy of the PDF with everything added locked into the pages
+   * ("name-edited.pdf"), or, if nothing was changed, an exact copy under the
+   * same name (for example to keep a PDF from an email). The original file
+   * is never changed.
    */
   async save(): Promise<void> {
     const file = this.current;
     if (!file || this.saving) return;
-    if (!this.hasChanges) {
-      showToast("Nothing to save yet. Draw, type, highlight, sign or fill in a form first.");
-      return;
-    }
+    const changed = this.hasChanges;
     this.tools.deactivate();
     const protection = await this.chooseProtection(file);
     if (!protection) return;
     // Ask where to save first, while the click still counts as the person's choice.
-    const target = await chooseSaveTarget(editedName(file.name));
+    const target = await chooseSaveTarget(changed ? editedName(file.name) : file.name);
     if (!target) return;
     this.saving = true;
     this.busy.querySelector("p")!.textContent = "Saving a copy…";
     this.busy.hidden = false;
     try {
       const pictured: number[] = [];
-      const bytes = await this.buildCopy(file, this.pagesState(file), protection, pictured);
+      const bytes = changed
+        ? await this.buildCopy(file, this.pagesState(file), protection, pictured)
+        : protection === "keep" || !file.doc.encrypted
+          ? file.bytes
+          : await this.unlockedBytes(file.sources[0]);
       await target.write(bytes);
-      if (this.current === file) this.dirty = false;
+      if (changed && this.current === file) this.dirty = false;
       const where = target.kind === "file" ? `Saved a copy: ${target.name}` : `Saved a copy to your Downloads: ${target.name}`;
       showToast(
         (file.doc.passwordProtected && protection === "keep" ? `${where} (same password)` : where) + picturedNote(pictured),
@@ -435,7 +436,6 @@ export class App {
     doc.onFormsChanged(() => {
       if (!this.current?.sources.some((s) => s.doc === doc)) return;
       this.dirty = true;
-      this.toolbar.setSaveEnabled(true);
     });
   }
 
@@ -452,7 +452,6 @@ export class App {
     this.hub.emit("document:opened", { name: file.name, pageCount: doc.pageCount });
     this.additions.replaceAll(state.additions);
     this.dirty = true;
-    this.toolbar.setSaveEnabled(this.hasChanges);
     this.hub.emit("pages:changed", { pageCount: doc.pageCount });
   }
 

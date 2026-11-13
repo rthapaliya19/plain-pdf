@@ -133,10 +133,10 @@ export class Toolbar {
     this.contentsButton.addEventListener("click", () => actions.toggleContents());
     this.docControls.append(this.contentsButton, search, pageGroup, zoomGroup);
 
-    this.saveButton = iconButton(icons.save, "Save", `Save a copy with your changes (${MOD}+S)`);
+    // Always available: saves a copy with your changes, or an exact copy if nothing was changed.
+    this.saveButton = iconButton(icons.save, "Save", `Save a copy (${MOD}+S)`);
     this.saveButton.classList.add("save-button");
     this.saveButton.hidden = true;
-    this.saveButton.disabled = true;
     this.saveButton.addEventListener("click", () => actions.save());
 
     this.moreMenu.element.hidden = true;
@@ -182,11 +182,6 @@ export class Toolbar {
   setContents(available: boolean, open: boolean): void {
     this.contentsButton.hidden = !available;
     this.contentsButton.setAttribute("aria-pressed", String(open));
-  }
-
-  /** Save is available once something has been added. */
-  setSaveEnabled(enabled: boolean): void {
-    this.saveButton.disabled = !enabled;
   }
 }
 

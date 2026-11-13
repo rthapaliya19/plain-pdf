@@ -162,3 +162,14 @@ Built in this order, each tried by the owner in the web preview, then one 1.3.0 
 - [x] 1.3: owner approved the preview and asked to publish (2026-11-06)
 - [x] 1.3: 1.3.0 apps released for Windows, Mac and Android (2026-11-06)
 - [x] 1.3: owner installed 1.3.0; everything working so far (2026-11-11)
+
+## Version 1.3.1: Save always available (agreed 2026-11-13)
+
+- The owner wanted to keep a PDF from an email and found Save greyed out (it only worked after a change).
+- Save is now always available. With no changes it saves an exact copy under the same name (owner's choice); with changes, "name-edited.pdf" as before. Password-protected files still ask whether to keep the password (keep = the exact original; without = an unlocked copy).
+- Preview first, then release 1.3.1 for all three devices.
+
+- [x] 1.3.1: built and tested (521 checks)
+- [ ] 1.3.1: owner tests the preview
+- [ ] 1.3.1: release 1.3.1 apps
+
