@@ -170,6 +170,6 @@ Built in this order, each tried by the owner in the web preview, then one 1.3.0 
 - Preview first, then release 1.3.1 for all three devices.
 
 - [x] 1.3.1: built and tested (521 checks)
-- [ ] 1.3.1: owner tests the preview
+- [x] 1.3.1: owner asked to release (2026-11-13)
 - [ ] 1.3.1: release 1.3.1 apps
 
