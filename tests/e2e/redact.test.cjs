@@ -4,6 +4,9 @@
 // text with letter/word spacing (the ' operator), a photo (JPEG) with invisible "OCR" text over it,
 // a logo with transparency (PNG), a blue rectangle and a long line, text inside a form drawing,
 // a hidden ActualText copy of a span, and a web link; on page 2 an inline picture.
+// tests/fixtures/redact-leaks.pdf has what an audit of 1.3.1 found left in redacted copies (a fax-compressed
+// scan, a drawing's text, shapes crossing a box, thumbnails, app-private data, a soft mask's text); the saved
+// copy's every object is searched for them.
 // Run `npm run preview` first, then: node tests/e2e/redact.test.cjs [screenshot-folder]
 const { chromium, devices } = require("playwright");
 const { execFileSync } = require("node:child_process");
@@ -51,7 +54,7 @@ function words(file) {
   const pages = html.split("<page ").slice(1);
   return pages.map((p) => [...p.matchAll(/<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)">([^<]*)<\/word>/g)].map((m) => ({ x0: +m[1], y0: +m[2], x1: +m[3], y1: +m[4], text: m[5] })));
 }
-const py = (code, file) => execFileSync("python3", ["-I", "-c", `import sys, json\nfrom pypdf import PdfReader\nr = PdfReader(sys.argv[1])\n${code}`, file]).toString().trim();
+const py = (code, file, ...more) => execFileSync("python3", ["-I", "-c", `import sys, json\nfrom pypdf import PdfReader\nr = PdfReader(sys.argv[1])\n${code}`, file, ...more]).toString().trim();
 
 (async () => {
   const before = words(pdf("redact-test.pdf"));
@@ -275,6 +278,149 @@ print(json.dumps({"n": len(r.pages[0].images), "size": im.size, "inside": im.get
   check("...and the next page is untouched", ow[1].some((x) => x.text === "3") && ow[1].some((x) => x.text === "25"));
   check("organize: no errors or warnings", op.length === 0, op.join(" | "));
   await octx.close();
+
+  // ----- Leaks an audit of 1.3.1 found (tests/fixtures/redact-leaks.pdf; see make-redact-test.cjs) -----
+  const lctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1 });
+  const L = await lctx.newPage();
+  const lp = await watch(L, "leaks");
+  const why = {};
+  L.on("console", (m) => {
+    const k = /^Page (\d+) saved as a picture for redaction \((.*)\)\.$/.exec(m.text());
+    if (k) why[k[1]] = k[2];
+  });
+  await L.goto(APP);
+  await L.setInputFiles("input[type=file]", pdf("redact-leaks.pdf"));
+  await L.waitForSelector('.page[data-page="1"] .page-canvas');
+  for (let k = 0; k < 3; k++) await L.click('button[title^="Zoom out"]');
+  await L.waitForTimeout(400);
+  await L.click('button[aria-label="More"]');
+  await L.click(".menu-item >> text=Redact");
+  // A box on each page (points from the page's top-left corner).
+  const leakBoxes = {
+    1: [60, 120, 480, 205], // the scan's "SCANNED SECRET 4417" and the drawing's "FORM SECRET 9081"
+    2: [135, 342, 315, 412], // PDF x 135-315, y 380-450: across the outlined text, both rules and the clip
+    3: [220, 462, 300, 522], // across the middle of the signature
+    4: [250, 262, 310, 302], // across the middle of the scribble
+    5: [90, 257, 370, 302], // over the soft mask's "MASKSECRET 5521"
+  };
+  for (const [n, [x0, y0, x1, y1]] of Object.entries(leakBoxes)) {
+    await L.fill(".page-input", n);
+    await L.press(".page-input", "Enter");
+    await L.waitForTimeout(400);
+    const lpg = await box(L, `.page[data-page="${n}"]`);
+    const k = lpg.w / 612;
+    await drag(L, [lpg.x + x0 * k, lpg.y + y0 * k], [lpg.x + x1 * k, lpg.y + y1 * k]);
+  }
+  await L.click(".redact-options .done-button");
+  await L.click("button.save-button");
+  await L.waitForFunction(() => window.__saves.length === 1 && window.__saves[0].bytes, null, { timeout: 60000 });
+  const lfile = join(SHOTS, "redacted-leaks.pdf");
+  writeFileSync(lfile, Buffer.from(await L.evaluate(() => window.__saves[0].bytes)));
+  const ltoast = await L.textContent(".toast");
+  check("leaks: pages 1, 3, 4 and 5 are saved as pictures, page 2 isn't", ltoast.includes("Pages 1, 3, 4, 5 were saved as a picture"), ltoast);
+  check("leaks: page 1 because of the fax-compressed scan", /CCITTFaxDecode/.test(why[1] ?? ""), why[1]);
+  check("leaks: page 3 because the signature's curves cross the box", why[3] === "a curved line partly under a box", why[3]);
+  check("leaks: page 4 because a 30-segment line crosses the box", why[4] === "a long line partly under a box", why[4]);
+  check("leaks: page 5 because the check after redacting finds the soft mask's text under the box", /^check: letters left under a box/.test(why[5] ?? ""), why[5]);
+
+  // Every object in the saved file (decoded and as stored), plus every stream in its bytes inflated:
+  // none of the removed content may be anywhere in it.
+  const scanStart = py(`
+import logging
+logging.disable(logging.WARNING)
+for num in range(1, int(r.trailer["/Size"])):
+    o = r.get_object(num)
+    if hasattr(o, "get_data") and o.get("/Filter") == "/CCITTFaxDecode":
+        print(o._data[:48].hex())`, pdf("redact-leaks.pdf"));
+  check("leaks: (the original has the scan, 48 bytes to look for)", scanStart.length === 96);
+  const leakSecrets = {
+    "the scan's compressed data": scanStart,
+    "the drawing's text": "FORM SECRET",
+    "the thumbnails": "THUMB-OF-PAGE",
+    "the app-private data": "AIPRIVATE",
+    "the XMP thumbnail": "XMPTHUMBSECRET",
+    "the soft mask's text": "MASKSECRET",
+    "the signature's curves": ["150 340 170 260 190 300 c", "210 340 230 260 250 300 c", "270 340 290 260 310 300 c"],
+    "the scribble": "250 500 l 260 520 l 270 500 l",
+    "the outlined text under the box": ["140 400 8 40 re", "160 400 8 40 re", "180 400 8 40 re", "200 400 8 40 re", "220 400 8 40 re", "240 400 8 40 re"],
+    "the outlined text crossing the box (whole)": ["100 445 150 10 re", "300 400 30 40 re", "325 405 -20 30 re"],
+    "the rules and clip crossing the box (whole)": ["72 395 m 540 395 l", "72 385 m 540 385 l", "110 455 40 -50 re"],
+  };
+  const found = JSON.parse(py(`
+import re, zlib, logging
+logging.disable(logging.WARNING)
+secrets = json.loads(sys.argv[2])
+data = open(sys.argv[1], "rb").read()
+blobs = [data]
+for num in range(1, int(r.trailer["/Size"])):
+    try:
+        o = r.get_object(num)
+    except Exception:
+        continue
+    blobs.append(repr(o).encode("latin1", "replace"))
+    if hasattr(o, "get_data"):
+        blobs.append(getattr(o, "_data", b"") or b"")
+        try:
+            blobs.append(o.get_data())
+        except Exception:
+            pass
+for m in re.finditer(rb"stream\\r?\\n", data):
+    try:
+        blobs.append(zlib.decompressobj().decompress(data[m.end():]))
+    except Exception:
+        pass
+found = {}
+for what, s in secrets.items():
+    for one in (s if isinstance(s, list) else [s]):
+        b = bytes.fromhex(one) if what == "the scan's compressed data" else one.encode()
+        if any(b in x or b.hex().encode() in x.lower() for x in blobs):
+            found.setdefault(what, []).append(one)
+def described(n):
+    try:
+        return repr(r.get_object(n))
+    except Exception:
+        return ""
+ccitt = [n for n in range(1, int(r.trailer["/Size"])) if "CCITTFaxDecode" in described(n) or "'/Width': 1700" in described(n)]
+print(json.dumps({"found": found, "ccitt": ccitt, "objects": len(blobs)}))`, lfile, JSON.stringify(leakSecrets)));
+  for (const what of Object.keys(leakSecrets)) {
+    check(`leaks: ${what} is nowhere in the saved file`, !found.found[what], JSON.stringify(found.found[what] ?? ""));
+  }
+  check("leaks: no fax-compressed or 1700x2200 picture anywhere in the file (the scan can't be pointed at again)", found.ccitt.length === 0, JSON.stringify(found.ccitt));
+  const lpages = JSON.parse(py(`
+pages = []
+for p in r.pages:
+    res = p["/Resources"]
+    xo = res.get("/XObject") or {}
+    pages.append({"keys": sorted(k for k in p.keys() if k in ("/Thumb", "/PieceInfo", "/Metadata")), "xobjects": sorted(xo.keys()),
+                  "images": [list(i.image.size) for i in p.images], "content": p.get_contents().get_data().decode("latin1")})
+md = r.trailer["/Root"].get("/Metadata")
+print(json.dumps({"pages": pages, "xmp": md.get_object().get_data().decode("utf8") if md else None}))`, lfile));
+  check("leaks: no page keeps a thumbnail, app-private data or page XMP", lpages.pages.every((p) => p.keys.length === 0), JSON.stringify(lpages.pages.map((p) => p.keys)));
+  check("leaks: page 1's resource list holds only its picture", JSON.stringify(lpages.pages[0].xobjects) === '["/PlainPdfPagePicture"]', JSON.stringify(lpages.pages[0].xobjects));
+  check("leaks: the file's XMP details are kept, without the thumbnail", lpages.xmp?.includes("Leak test title") && !lpages.xmp.includes("Thumbnails"), lpages.xmp?.slice(0, 80));
+  const lw = words(lfile);
+  check("leaks: pages 1, 3, 4 and 5 are pictures (no text, one picture each)", [0, 2, 3, 4].every((i) => lw[i].length === 0 && lpages.pages[i].images.length === 1));
+  // Page 2 stays real: shapes not running inside the box are as written, those crossing it are cut along it.
+  const c2 = lpages.pages[1].content;
+  check("leaks: page 2 is still real text and keeps its own picture", lw[1].map((x) => x.text).join(" ") === "Kept heading on page two" && JSON.stringify(lpages.pages[1].images) === "[[4,4]]", JSON.stringify(lpages.pages[1]).slice(0, 200));
+  check("...the page-sized background and the outlined text beside the box are kept as written", c2.includes("0 0 612 792 re f") && c2.includes("100 400 8 40 re 120 400 8 40 re"));
+  const left = /72 395 m ([\d.]+) 395 l/.exec(c2);
+  const right = /([\d.]+) 395 m 540 395 l/.exec(c2);
+  check("...the rule is cut at the box's edges (just inside them)", left && right && +left[1] > 134 && +left[1] < 137.5 && +right[1] > 312.5 && +right[1] < 316.5, `${left?.[0]} | ${right?.[0]}`);
+  const dash = /\[6 4\] ([\d.]+) d ([\d.]+) 385 m 540 385 l S Q/.exec(c2);
+  check("...the dashed rule's dashes carry on after the box as before", dash && Math.abs(+dash[1] - (+dash[2] - 72)) < 0.01, dash?.[0]);
+  execFileSync("pdftoppm", ["-r", "144", "-png", "-f", "2", "-l", "2", "-singlefile", lfile, join(SHOTS, "redact-leaks-p2")]);
+  const px = JSON.parse(execFileSync("python3", ["-I", "-c", `
+import sys, json
+from PIL import Image
+im = Image.open(sys.argv[1]).convert("RGB")
+at = lambda x, y: im.getpixel((round(x * 2), round((792 - y) * 2)))
+print(json.dumps({"hole": at(320, 420), "ring": at(328, 420), "box": at(225, 420), "rule": at(100, 395), "clip": at(114, 430), "bar": at(104, 420)}))`, join(SHOTS, "redact-leaks-p2.png")]).toString());
+  const dark = (p) => p.every((c) => c < 60);
+  check("...the O's hole beside the box is still a hole, its ring still black", px.hole[2] > 200 && px.hole[0] > 180 && dark(px.ring), JSON.stringify(px));
+  check("...black under the box; the rule, clipped green and bars outside it as before", dark(px.box) && px.rule[2] > 100 && px.rule[0] < 60 && px.clip[1] > 100 && px.clip[0] < 60 && dark(px.bar), JSON.stringify(px));
+  check("leaks: no errors or warnings", lp.length === 0, lp.join(" | "));
+  await lctx.close();
 
   // ----- Phone -----
   const mctx = await browser.newContext({ ...devices["Pixel 7"] });

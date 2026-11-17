@@ -173,3 +173,15 @@ Built in this order, each tried by the owner in the web preview, then one 1.3.0 
 - [x] 1.3.1: owner asked to release (2026-11-13)
 - [x] 1.3.1: 1.3.1 apps released for Windows, Mac and Android (2026-11-13)
 
+
+## Redaction leaks found in 1.3.1 (2026-11-17)
+
+An audit found that redacted copies could still contain what was removed. Fixed in src/save/redact.ts (text edits use the same code, so they're fixed too):
+
+- Pages saved as pictures (fax-compressed scans, inline pictures, unusual fonts...) kept their old pictures, drawings and fonts in the file. Such a page now gets a resource list holding only its picture. Resource lists inherited from the page tree, or shared with other pages, no longer keep a redacted page's originals in the file either (they're taken off lists of pages that don't draw them).
+- Drawn shapes only partly under a box were kept whole. Now a shape (or clipping path) whose outline runs inside a box is cut along the box if it's a rectangle or a straight line of up to 4 segments; a curve or a longer line makes the page a picture. Shapes that only surround a box (page backgrounds) stay as they are.
+- Redacted pages lose their thumbnail (/Thumb), app-private data (/PieceInfo, e.g. Illustrator's copy of the artwork) and page XMP. Painted pictures and redacted drawings don't take their originals' alternate versions, XMP or private data. The file's XMP thumbnail is removed.
+- After redacting, each page is read again from the saved objects: if any letter, unpainted picture, shape, link or hidden copy of words is left under a box (also inside soft masks, which redaction doesn't change), the page is saved as a picture.
+
+- [x] Fixed and tested (tests/fixtures/redact-leaks.pdf; redaction 93 checks)
+- [ ] Owner to try the preview, then release

@@ -57,7 +57,7 @@ import {
 } from "../core/additions";
 import type { FontStyle } from "../core/fonts";
 import type { Matrix } from "../core/pdf-engine";
-import { redactPage, removeUnreachable, replaceWithPicture, type Area } from "./redact";
+import { clearOutLeftovers, redactPage, replaceWithPicture, type Area } from "./redact";
 
 /** A shown-page rectangle (points, top-left origin) and the colour it's painted. */
 export interface PaintedRect {
@@ -103,7 +103,7 @@ export async function saveWithAdditions(
 
   if (options.lockForms) lockFormAnswers(doc);
 
-  if (await drawAdditions(doc, additions, pageToPdf, options)) removeUnreachable(doc);
+  if (await drawAdditions(doc, additions, pageToPdf, options)) clearOutLeftovers(doc);
   return doc.save();
 }
 
@@ -148,7 +148,7 @@ export async function saveWorkspace(
     page.setRotation(degrees((((page.getRotation().angle + entry.rotation) % 360) + 360) % 360));
     out.addPage(page);
   }
-  if (await drawAdditions(out, additions, pageToPdf, options)) removeUnreachable(out);
+  if (await drawAdditions(out, additions, pageToPdf, options)) clearOutLeftovers(out);
   return out.save();
 }
 
