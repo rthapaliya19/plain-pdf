@@ -290,6 +290,31 @@ async function drag(page, from, to, steps = 12) {
   check("scan: a clearly sloped line stays sloped", sn.length === 4 && sn[3] - sn[1] > 30, steep);
   await page.screenshot({ path: `${SHOTS}/p2b-d3-scan.png` });
 
+  // ----- A finished pen line keeps only the points that make a difference, and corners stay sharp -----
+  await page.click('button[aria-label="Black pen"]');
+  await page.click('button[aria-label="Medium line"]');
+  // A tick: 30 small steps down to its tip, then 90 up and away (121 points as drawn).
+  const tip = [b.x + 180, b.y + 420];
+  await page.mouse.move(tip[0] - 30, tip[1] - 30);
+  await page.mouse.down();
+  await page.mouse.move(tip[0], tip[1], { steps: 30 });
+  await page.mouse.move(tip[0] + 90, tip[1] - 90, { steps: 90 });
+  await page.mouse.up();
+  const tick = await page.evaluate(([tx, ty]) => {
+    const path = [...document.querySelectorAll('.page[data-page="1"] .layer-ink path')].pop();
+    const at = new DOMPoint(tx, ty).matrixTransform(path.ownerSVGElement.getScreenCTM().inverse());
+    // How close the line as drawn on screen comes to the tip (in points).
+    let closest = Infinity;
+    for (let d = 0, len = path.getTotalLength(); d <= len; d += 0.05) {
+      const p = path.getPointAtLength(d);
+      closest = Math.min(closest, Math.hypot(p.x - at.x, p.y - at.y));
+    }
+    return { points: path.getAttribute("d").match(/[MQL]/g).length, closest };
+  }, tip);
+  check("a finished pen line keeps only the points it needs", tick.points <= 30, `${tick.points} of 121 points kept`);
+  check("...and its sharp corner stays sharp", tick.closest < 0.5, `passes ${tick.closest.toFixed(2)} pt from the tip`);
+  await page.keyboard.press("Control+z");
+
   check("desktop: no privacy-lock violations", (await page.evaluate(() => window.__csp)).length === 0);
   check("desktop: no errors or warnings", problems.length === 0, problems.join(" | "));
   await ctx.close();

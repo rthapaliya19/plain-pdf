@@ -70,10 +70,19 @@ interface Box {
   x1: number;
   y1: number;
 }
+/** The box around some points. (A loop, not Math.min(...xs): a drawn path can have more points than a call takes arguments.) */
 function bounds(points: [number, number][]): Box {
-  const xs = points.map((p) => p[0]);
-  const ys = points.map((p) => p[1]);
-  return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const [x, y] of points) {
+    if (x < x0) x0 = x;
+    if (x > x1) x1 = x;
+    if (y < y0) y0 = y;
+    if (y > y1) y1 = y;
+  }
+  return { x0, y0, x1, y1 };
 }
 function overlap(a: Box, b: Box): { w: number; h: number } {
   return { w: Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0), h: Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0) };

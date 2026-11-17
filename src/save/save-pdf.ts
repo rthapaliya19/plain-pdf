@@ -237,22 +237,43 @@ async function drawAdditions(doc: PDFDocument, additions: Addition[], pageToPdf:
     const ops: PDFOperator[] = [pushGraphicsState(), concatTransformationMatrix(...pageToPdf[index])];
     for (const e of edits) {
       const font = await fonts.get(e);
-      ops.push(...drawEdit(e, font, fonts.keyOn(page, e)));
+      append(ops, drawEdit(e, font, fonts.keyOn(page, e)));
     }
     if (highlights.length > 0) {
       ops.push(pushGraphicsState(), setGraphicsState(multiplyBlend(doc, page)));
-      for (const item of highlights) ops.push(...drawAddition(item as Exclude<Addition, TextBox | TextEdit>));
+      for (const item of highlights) append(ops, drawAddition(item as Exclude<Addition, TextBox | TextEdit>));
       ops.push(popGraphicsState());
     }
     const fontKey = helvetica && ink.some((a) => a.kind === "text") ? page.node.newFontDictionary("PlainPdfHelv", helvetica.ref) : null;
     for (const item of ink) {
-      if (item.kind === "text") ops.push(...drawText(item, helvetica!, fontKey!));
-      else ops.push(...drawAddition(item as Exclude<Addition, TextBox | TextEdit>));
+      if (item.kind === "text") append(ops, drawText(item, helvetica!, fontKey!));
+      else append(ops, drawAddition(item as Exclude<Addition, TextBox | TextEdit>));
     }
     ops.push(popGraphicsState());
-    page.pushOperators(...ops);
+    pushOperators(page, ops);
   }
   return redacted;
+}
+
+/**
+ * The most drawing commands handed to pdf-lib in one call. pdf-lib passes
+ * them along as function arguments (three calls deep), and browsers only
+ * allow so many arguments at once: a page with about 40,000 pen points went
+ * over ("Maximum call stack size exceeded") and couldn't be saved or printed.
+ */
+const OPERATORS_PER_CALL = 2000;
+
+/** Adds drawing commands to a page, a batch at a time, so any number fits. */
+function pushOperators(page: PDFPage, ops: PDFOperator[]): void {
+  for (let i = 0; i < ops.length; i += OPERATORS_PER_CALL) page.pushOperators(...ops.slice(i, i + OPERATORS_PER_CALL));
+}
+
+/**
+ * Adds `more` to the end of `ops` one by one. (`ops.push(...more)` passes
+ * every command as an argument, which overflows on one very long stroke.)
+ */
+function append(ops: PDFOperator[], more: readonly PDFOperator[]): void {
+  for (const op of more) ops.push(op);
 }
 
 /** The standard PDF font matching an edit's look (every PDF reader has these built in). */
@@ -427,7 +448,10 @@ function drawSignature(sig: PlacedSignature): PDFOperator[] {
     setLineCap(LineCapStyle.Round),
     setLineJoin(LineJoinStyle.Round),
   ];
-  for (const points of sig.ink.strokes) ops.push(...smoothPathOps(points), stroke());
+  for (const points of sig.ink.strokes) {
+    append(ops, smoothPathOps(points));
+    ops.push(stroke());
+  }
   ops.push(popGraphicsState());
   return ops;
 }

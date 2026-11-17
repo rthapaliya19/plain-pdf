@@ -105,7 +105,7 @@ src/
     page-ops.ts        rotate, delete, move, add and pick pages, keeping additions on their pages
   overlay/
     overlay-renderer.ts  shows additions on each page (highlight and ink layers)
-    paths.ts             smoothing and eraser hit-testing for strokes
+    paths.ts             smoothing, thinning (dropping points that make no visible difference) and eraser hit-testing for strokes
   tools/
     draw/              the Draw tool: pen, highlighter, eraser and its options strip
     sign/              signatures and initials: the pad, saving them on the device, placing, moving and resizing

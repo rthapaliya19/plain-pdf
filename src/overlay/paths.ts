@@ -24,6 +24,118 @@ export function smoothPath(points: number[]): string {
   return d;
 }
 
+/** Points looked at together when thinning (keeps the time taken in proportion to the stroke's length). */
+const THIN_WINDOW = 1000;
+
+/** Most rounds of corner checks when thinning (each can only add points; one round is usually enough). */
+const CORNER_PASSES = 8;
+
+/**
+ * Drops points that make no visible difference to a stroke: fewer points
+ * make smaller saved files and faster drawing on screen. Points within
+ * `tolerance` of the straight line between the points kept around them are
+ * dropped (Ramer-Douglas-Peucker). smoothPath curves through the midpoints
+ * between points, which would round off a sharp corner (the tip of a tick)
+ * once the points beside it are gone, so where the curve would move more
+ * than `tolerance`, the points either side of the corner are kept too.
+ */
+export function thinPoints(points: number[], tolerance: number): number[] {
+  const n = points.length / 2;
+  if (n <= 3 || !(tolerance > 0)) return points;
+  const keep = new Uint8Array(n);
+  const limit = tolerance * tolerance;
+  for (let first = 0; first < n - 1; first += THIN_WINDOW) {
+    const last = Math.min(first + THIN_WINDOW, n - 1);
+    keep[first] = keep[last] = 1;
+    keepFarthest(points, first, last, limit, keep);
+  }
+  for (let pass = 0; pass < CORNER_PASSES && keepCorners(points, keep, limit); pass++);
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) if (keep[i]) out.push(points[i * 2], points[i * 2 + 1]);
+  return out;
+}
+
+/**
+ * Where the curve through just the kept points would pass farther than the
+ * tolerance (squared: `limit`) from where it passed before, near a kept
+ * point, keeps the points either side of it too. True if any were added.
+ */
+function keepCorners(points: number[], keep: Uint8Array, limit: number): boolean {
+  const kept: number[] = [];
+  for (let i = 0; i < keep.length; i++) if (keep[i]) kept.push(i);
+  const px = (i: number) => points[i * 2];
+  const py = (i: number) => points[i * 2 + 1];
+  let added = false;
+  for (let j = 1; j < kept.length - 1; j++) {
+    const v = kept[j];
+    const before = kept[j - 1];
+    const after = kept[j + 1];
+    if (before === v - 1 && after === v + 1) continue; // Nothing dropped here: drawn exactly as before.
+    // The middle of the curve around point v, as drawn before...
+    const ox = curveMiddle(px(v - 1), px(v), px(v + 1), v === 1);
+    const oy = curveMiddle(py(v - 1), py(v), py(v + 1), v === 1);
+    // ...and the curve around it now.
+    const [sx, sy] = j === 1 ? [px(before), py(before)] : [(px(before) + px(v)) / 2, (py(before) + py(v)) / 2];
+    const ex = (px(v) + px(after)) / 2;
+    const ey = (py(v) + py(after)) / 2;
+    if (curveDist2(ox, oy, sx, sy, px(v), py(v), ex, ey) > limit) {
+      keep[v - 1] = keep[v + 1] = 1;
+      added = true;
+    }
+  }
+  return added;
+}
+
+/**
+ * One coordinate of the middle of the curve smoothPath draws around a point,
+ * given that coordinate of the point before it, the point and the point after.
+ * (`first`: the point before is the stroke's start, which the curve starts
+ * from, rather than a midpoint.)
+ */
+function curveMiddle(before: number, at: number, after: number, first: boolean): number {
+  const start = first ? before : (before + at) / 2;
+  return (start + 2 * at + (at + after) / 2) / 4;
+}
+
+/** Squared distance from (px, py) to the curve from s to e bent towards c (sampled finely enough for this). */
+function curveDist2(px: number, py: number, sx: number, sy: number, cx: number, cy: number, ex: number, ey: number): number {
+  const STEPS = 16;
+  let best = Infinity;
+  let ax = sx;
+  let ay = sy;
+  for (let k = 1; k <= STEPS; k++) {
+    const t = k / STEPS;
+    const u = 1 - t;
+    const bx = u * u * sx + 2 * u * t * cx + t * t * ex;
+    const by = u * u * sy + 2 * u * t * cy + t * t * ey;
+    best = Math.min(best, segmentDist2(px, py, ax, ay, bx, by));
+    ax = bx;
+    ay = by;
+  }
+  return best;
+}
+
+/** Ramer-Douglas-Peucker between points `first` and `last`, marking the points to keep. A loop, so long strokes can't overflow the stack. */
+function keepFarthest(points: number[], first: number, last: number, limit: number, keep: Uint8Array): void {
+  const spans = [first, last];
+  while (spans.length > 0) {
+    const b = spans.pop()!;
+    const a = spans.pop()!;
+    let farthest = -1;
+    let most = limit;
+    for (let i = a + 1; i < b; i++) {
+      const d = segmentDist2(points[i * 2], points[i * 2 + 1], points[a * 2], points[a * 2 + 1], points[b * 2], points[b * 2 + 1]);
+      if (d > most) {
+        most = d;
+        farthest = i;
+      }
+    }
+    if (farthest < 0) continue;
+    keep[farthest] = 1;
+    spans.push(a, farthest, farthest, b);
+  }
+}
+
 /** Is point (px, py) within `radius` of the line through the points? */
 export function hitsStroke(points: number[], px: number, py: number, radius: number): boolean {
   const n = points.length / 2;

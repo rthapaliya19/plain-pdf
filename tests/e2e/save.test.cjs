@@ -325,6 +325,105 @@ function pypdf(code, file) {
   check("downloads: no errors or warnings", dproblems.length === 0, dproblems.join(" | "));
   await dctx.close();
 
+  // ================= 200,000 pen points on one page: saves, prints and reopens =================
+  // (pdf-lib takes drawing commands as function arguments; one call with tens of thousands overflowed.)
+  const bctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
+  await bctx.addInitScript(FAKE_SAVE_PICKER);
+  await bctx.addInitScript(() => {
+    // Lines are drawn with made-up pointer events below, which can't be captured.
+    Element.prototype.setPointerCapture = () => {};
+    // Instead of the print window: count the pages, and the ink in the drawn area of page 1 (while the pictures are there).
+    window.__prints = [];
+    window.print = () => {
+      const imgs = [...document.querySelectorAll("#print-root img")];
+      const img = imgs[0];
+      const f = window.__inkArea;
+      const c = document.createElement("canvas");
+      c.width = img.naturalWidth;
+      c.height = img.naturalHeight;
+      const g = c.getContext("2d");
+      g.drawImage(img, 0, 0);
+      const d = g.getImageData(Math.floor(f.x0 * c.width), Math.floor(f.y0 * c.height), Math.ceil((f.x1 - f.x0) * c.width), Math.ceil((f.y1 - f.y0) * c.height)).data;
+      let dark = 0;
+      for (let i = 0; i < d.length; i += 4) if (d[i] < 90 && d[i + 1] < 90 && d[i + 2] < 90) dark++;
+      window.__prints.push({ pages: imgs.length, dark, total: d.length / 4 });
+      setTimeout(() => window.dispatchEvent(new Event("afterprint")), 50);
+    };
+  });
+  const big = await bctx.newPage();
+  const bproblems = await watch(big, "many points");
+  await big.goto(APP);
+  await openFile(big, pdf("sample-25-pages.pdf"));
+  await big.click('button[aria-label="Draw"]');
+  await big.click('button[aria-label="Black pen"]');
+  await big.click('button[aria-label="Thin line"]');
+  const STROKES = 1000;
+  const PER_STROKE = 200;
+  for (let first = 0; first < STROKES; first += 100) {
+    await big.evaluate(({ first, perStroke }) => {
+      const viewer = document.querySelector(".viewer");
+      const pr = document.querySelector('.page[data-page="1"]').getBoundingClientRect();
+      const vr = viewer.getBoundingClientRect();
+      const top = Math.max(pr.top, vr.top);
+      const height = Math.min(pr.bottom, vr.bottom) - top;
+      const at = (x, y) => ({ bubbles: true, cancelable: true, pointerId: 7, pointerType: "mouse", isPrimary: true, button: 0, buttons: 1, clientX: x, clientY: y });
+      for (let k = first; k < first + 100; k++) {
+        const x0 = pr.left + 30 + ((k * 7) % 60);
+        const y0 = top + 20 + (k % 40) * ((height - 40) / 40);
+        viewer.dispatchEvent(new PointerEvent("pointerdown", at(x0, y0)));
+        // A zigzag: every point is a corner, so all of them are kept.
+        for (let i = 1; i < perStroke; i++) viewer.dispatchEvent(new PointerEvent("pointermove", at(x0 + i * 1.5, y0 + (i % 2) * 3)));
+        viewer.dispatchEvent(new PointerEvent("pointerup", { ...at(x0 + perStroke * 1.5, y0), buttons: 0 }));
+      }
+    }, { first, perStroke: PER_STROKE });
+  }
+  const drawnPoints = await big.$$eval('.page[data-page="1"] .layer-ink path', (ps) => ps.reduce((n, p) => n + p.getAttribute("d").match(/[MQL]/g).length, 0));
+  check("200,000 pen points on page 1", drawnPoints === STROKES * PER_STROKE, `${drawnPoints} points`);
+  // Where the lines are, as fractions of the page, and how dark that area is without them.
+  const inkArea = await big.$eval('.page[data-page="1"] .layer-ink', (svg) => {
+    const b = svg.getBBox();
+    const v = svg.viewBox.baseVal;
+    return { x0: b.x / v.width, y0: b.y / v.height, x1: (b.x + b.width) / v.width, y1: (b.y + b.height) / v.height };
+  });
+  await big.evaluate((f) => (window.__inkArea = f), inkArea);
+  const plainArea = await pixelStats(big, 1, inkArea);
+  await big.click(".draw-options .done-button");
+
+  const savedAt = Date.now();
+  await big.keyboard.press("Control+s");
+  await big.waitForFunction(() => (window.__saves.length === 1 && window.__saves[0].bytes) || document.querySelector("dialog[open]"), null, { timeout: 120000 });
+  const saveError = await big.$eval("dialog[open]", (d) => d.textContent).catch(() => null);
+  check("a page with 200,000 points saves", !saveError, saveError ?? `${Date.now() - savedAt} ms`);
+  if (!saveError) {
+    await big.waitForSelector(".toast >> text=Saved a copy");
+    await big.waitForFunction(() => document.querySelector(".overlay.busy")?.hidden);
+    const bigFile = join(SHOTS, "saved-many-points.pdf");
+    writeFileSync(bigFile, await savedBytes(big));
+    check("...as a valid PDF with all 25 pages", pypdf("print(len(r.pages))", bigFile) === "25");
+    const pathCommands = (f) => Number(pypdf("data = r.pages[0].get_contents().get_data()\nprint(sum(1 for line in data.split(b'\\n') if line.endswith((b' m', b' c', b' l'))))", f));
+    const added = pathCommands(bigFile) - pathCommands(pdf("sample-25-pages.pdf"));
+    check("...with every point in page 1's drawing", added === STROKES * PER_STROKE, `${added} path commands added`);
+
+    await big.keyboard.press("Control+p");
+    await big.waitForFunction(() => window.__prints.length === 1 || document.querySelector("dialog[open]"), null, { timeout: 120000 });
+    const printError = await big.$eval("dialog[open]", (d) => d.textContent).catch(() => null);
+    const printed = await big.evaluate(() => window.__prints[0]);
+    check("a page with 200,000 points prints", !printError && printed?.pages === 25, printError ?? `${printed?.pages} pages`);
+    check("...with the lines in the printout", printed && printed.dark > printed.total * (plainArea.dark / plainArea.total + 0.15), printed && `${printed.dark}/${printed.total} dark, ${plainArea.dark}/${plainArea.total} without the lines`);
+
+    await big.waitForFunction(() => !document.querySelector("#print-root"));
+    await big.setInputFiles("input[type=file]", bigFile);
+    await big.waitForFunction(() => document.querySelector(".file-name")?.textContent === "saved-many-points.pdf", null, { timeout: 60000 });
+    await big.waitForSelector('.page[data-page="1"] .page-canvas');
+    await big.waitForTimeout(1000);
+    check("the saved copy reopens, lines locked into the page", (await count(big, ".layer > *")) === 0);
+    const reopened = await pixelStats(big, 1, inkArea);
+    check("...and shows the lines where they were drawn", reopened.dark > reopened.total * (plainArea.dark / plainArea.total + 0.15), `${reopened.dark}/${reopened.total} dark, ${plainArea.dark}/${plainArea.total} without the lines`);
+    await big.screenshot({ path: `${SHOTS}/p4-d7-many-points.png` });
+  }
+  check("many points: no errors or warnings", bproblems.length === 0, bproblems.join(" | "));
+  await bctx.close();
+
   // ================= Phone (Pixel 7) =================
   const mctx = await browser.newContext({ ...devices["Pixel 7"], acceptDownloads: true });
   await mctx.addInitScript(NO_SAVE_PICKER);

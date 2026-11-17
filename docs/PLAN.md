@@ -173,3 +173,12 @@ Built in this order, each tried by the owner in the web preview, then one 1.3.0 
 - [x] 1.3.1: owner asked to release (2026-11-13)
 - [x] 1.3.1: 1.3.1 apps released for Windows, Mac and Android (2026-11-13)
 
+## Fix: pages with very many pen strokes (2026-11-17)
+
+- An audit found Save (and Print, which builds the same copy) failed with "Couldn't save" once one page had about 40,000 pen points (for example 400 strokes of 100 points). The drawing commands for a page were handed to pdf-lib in one call, which went over the browser's limit on arguments ("Maximum call stack size exceeded"). One very long stroke failed the same way.
+- Fixed: drawing commands are handed over in batches of 2,000, and no list of unknown length is spread into a call anymore (also fixed in redaction, for pages that contain a very long drawn path). pdf-lib's own form locking was checked: it adds a few commands per field, so it was never affected.
+- A page with 200,000 points now saves in about 1.5 seconds (a 2 MB copy), prints, and reopens.
+- Finished pen lines are thinned: points that make no visible difference are dropped (the line moves by at most about a tenth of its thickness, and corners such as the tip of a tick stay sharp). Handwriting with a stylus or finger keeps about a quarter of its points; with a mouse, about half to two-thirds.
+- Drawing on a full page stays fast: lines already on the page are no longer redrawn each time one is added (with 2,000 strokes on a page, adding one took 54 ms; now under 1 ms).
+
+- [x] Fix: built and tested (532 checks, including 200,000 points on one page: saves, prints and reopens)

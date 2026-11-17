@@ -22,7 +22,7 @@ import {
 import type { History } from "../../core/history";
 import { highlightRects, lineAt, type Rect, type TextLayoutCache, type TextLine } from "../../core/text-layout";
 import type { Tool } from "../../core/tools";
-import { hitsStroke } from "../../overlay/paths";
+import { hitsStroke, thinPoints } from "../../overlay/paths";
 import type { OverlayRenderer } from "../../overlay/overlay-renderer";
 import type { Viewer } from "../../viewer/viewer";
 import { DrawOptions } from "./draw-options";
@@ -43,6 +43,13 @@ const MIN_STEP_PX = 0.75;
 const ERASER_RADIUS_PX = 10;
 /** Straight highlighter lines within this angle of level snap to perfectly level. */
 const LEVEL_SNAP_DEGREES = 12;
+/**
+ * A finished pen line keeps only the points that make a visible difference:
+ * it may move by about this fraction of its thickness, and no more than
+ * about this many screen pixels at the zoom it was drawn at (see thinPoints).
+ */
+const THIN_TOLERANCE = 0.1;
+const THIN_TOLERANCE_PX = 0.5;
 
 type Point = { x: number; y: number };
 
@@ -250,7 +257,7 @@ export class DrawTool implements Tool {
     if (g.kind === "pen") {
       cancelAnimationFrame(g.frame);
       this.overlay.endLive(g.path);
-      if (keep) this.commit(roundPoints(g.stroke));
+      if (keep) this.commit(this.thinned(g.stroke));
     } else if (g.kind === "highlight") {
       cancelAnimationFrame(g.frame);
       const cache = this.textLayout();
@@ -292,6 +299,13 @@ export class DrawTool implements Tool {
     } else if (g.mode === "straight" && Math.hypot(g.end.x - g.start.x, g.end.y - g.start.y) > 2) {
       this.commit(roundPoints(g.stroke));
     }
+  }
+
+  /** A finished pen line, without the points that make no visible difference. */
+  private thinned(stroke: Stroke): Stroke {
+    const rounded = roundPoints(stroke);
+    const tolerance = Math.min(stroke.width * THIN_TOLERANCE, THIN_TOLERANCE_PX / this.viewer.cssPixelsPerPoint);
+    return { ...rounded, points: thinPoints(rounded.points, tolerance) };
   }
 
   private commit(item: Addition): void {

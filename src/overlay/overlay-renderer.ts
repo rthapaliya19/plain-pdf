@@ -13,6 +13,7 @@ import {
   TEXT_LINE_HEIGHT,
   boxMatrix,
   contentSize,
+  type Addition,
   type Additions,
   type PlacedSignature,
   type Redaction,
@@ -47,6 +48,13 @@ export class OverlayRenderer {
   private layers = new Map<number, Layers>();
   private selectedId: string | null = null;
   private hiddenId: string | null = null;
+  /**
+   * The drawing made for each pen line and highlight, reused while it's on
+   * the page: an addition never changes (a change makes a new copy), and
+   * redrawing every line on a page each time one is added gets slow once
+   * there are thousands.
+   */
+  private drawn = new WeakMap<Addition, SVGElement>();
 
   constructor(
     private readonly viewer: Viewer,
@@ -145,20 +153,22 @@ export class OverlayRenderer {
     const items = this.additions.onPage(page);
     if (items.length === 0 && !this.layers.has(page)) return;
     const layers = this.layersFor(page);
-    for (const layer of [layers.edits, layers.highlight, layers.ink]) {
-      for (const child of [...layer.children]) if (!child.classList.contains("live")) child.remove();
-    }
     layers.boxes.replaceChildren();
+    const wanted = new Map<SVGSVGElement, SVGElement[]>([
+      [layers.edits, []],
+      [layers.highlight, []],
+      [layers.ink, []],
+    ]);
 
     const size = this.viewer.pageSize(page);
     for (const item of items) {
       let element: SVGElement;
       let layer: SVGSVGElement;
       if (item.kind === "stroke") {
-        element = strokePath(item);
+        element = this.reuse(item, strokePath);
         layer = item.tool === "highlighter" ? layers.highlight : layers.ink;
       } else if (item.kind === "highlight") {
-        element = highlightGroup(item);
+        element = this.reuse(item, highlightGroup);
         layer = layers.highlight;
       } else if (item.kind === "text") {
         element = textGroup(item);
@@ -177,10 +187,19 @@ export class OverlayRenderer {
         layer = layers.ink;
         layers.boxes.append(itemBox(item, size, item.id === this.selectedId));
       }
-      if (item.id === this.hiddenId) element.classList.add("being-edited");
-      // Keep any in-progress drawing on top.
-      layer.insertBefore(element, layer.querySelector(":scope > .live"));
+      element.classList.toggle("being-edited", item.id === this.hiddenId);
+      wanted.get(layer)!.push(element);
     }
+    for (const [layer, elements] of wanted) arrange(layer, elements);
+  }
+
+  private reuse<T extends Stroke | TextHighlight>(item: T, draw: (item: T) => SVGElement): SVGElement {
+    let element = this.drawn.get(item);
+    if (!element) {
+      element = draw(item);
+      this.drawn.set(item, element);
+    }
+    return element;
   }
 
   private layersFor(page: number): Layers {
@@ -205,6 +224,22 @@ export class OverlayRenderer {
     layers = { edits, highlight, ink, boxes, overlay };
     this.layers.set(page, layers);
     return layers;
+  }
+}
+
+/**
+ * Makes `elements` the drawings in a layer, in this order, under any drawing
+ * still in progress (which stays on top). Drawings already in place are left
+ * alone, so adding one line to a full page only adds that line.
+ */
+function arrange(layer: SVGSVGElement, elements: SVGElement[]): void {
+  const wanted = new Set<Element>(elements);
+  for (const child of [...layer.children]) if (!wanted.has(child) && !child.classList.contains("live")) child.remove();
+  // Now only wanted drawings remain, followed by any in progress.
+  let next = layer.firstElementChild;
+  for (const element of elements) {
+    if (element === next) next = next.nextElementSibling;
+    else layer.insertBefore(element, next);
   }
 }
 
