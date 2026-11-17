@@ -60,6 +60,29 @@ async function closeOrganize(page) {
   await page.click(".organize .done-button");
   await page.waitForTimeout(400);
 }
+async function openPdf(page, name) {
+  await page.setInputFiles("input[type=file]", pdf(name));
+  await page.waitForFunction((name) => document.querySelector(".file-name")?.textContent === name, name);
+}
+// The pixels of page n's preview, once it is drawn (has ink and stops changing).
+async function drawnThumb(page, n) {
+  const read = () => page.evaluate((sel) => {
+    const c = document.querySelector(sel);
+    if (!c?.width) return "";
+    const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+    let ink = false;
+    for (let i = 0; i < d.length && !ink; i += 4) ink = d[i + 3] === 255 && d[i] + d[i + 1] + d[i + 2] < 600;
+    return ink ? c.toDataURL() : "";
+  }, `${tile(n)} canvas`);
+  let last = "";
+  for (let i = 0; i < 40; i++) {
+    const now = await read();
+    if (now && now === last) return now;
+    last = now;
+    await page.waitForTimeout(150);
+  }
+  return last;
+}
 
 (async () => {
   const browser = await chromium.launch();
@@ -206,6 +229,47 @@ async function closeOrganize(page) {
   });
   check("saved drawing turned with its page, in the right place", red > 30, `${red} red pixels`);
   await page.screenshot({ path: `${SHOTS}/c-d4-saved.png` });
+
+  // ----- Another file gets its own previews, not the last file's -----
+  await openPdf(page, "chapters.pdf");
+  await openOrganize(page);
+  const chaptersThumb = await drawnThumb(page, 1);
+  const oldCanvas = await page.evaluateHandle(() => document.querySelector('.organize .tile[data-pos="0"] canvas'));
+  await closeOrganize(page);
+  await openPdf(page, "scanned-letter.pdf");
+  check("opening another file lets go of the old previews", await oldCanvas.evaluate((c) => c.width === 0 && c.height === 0));
+  await openOrganize(page);
+  const letterThumb = await drawnThumb(page, 1);
+  // The letter opened on its own, in a fresh tab, shows what the preview should be.
+  const fresh = await ctx.newPage();
+  await fresh.goto(APP);
+  await openPdf(fresh, "scanned-letter.pdf");
+  await openOrganize(fresh);
+  const expected = await drawnThumb(fresh, 1);
+  await fresh.close();
+  check("the second file shows its own preview", (await page.textContent(".organize-count")) === "1 page" && letterThumb !== chaptersThumb && letterThumb === expected);
+  await page.screenshot({ path: `${SHOTS}/c-d5-second-file.png` });
+  await closeOrganize(page);
+
+  // ----- Previews far from view are let go, and drawn again on the way back -----
+  await openPdf(page, "sample-25-pages.pdf");
+  await openOrganize(page);
+  await page.setInputFiles(".organize input[type=file]", [pdf("sample-25-pages.pdf"), pdf("sample-25-pages.pdf"), pdf("sample-25-pages.pdf")]);
+  await page.waitForFunction(() => document.querySelectorAll(".organize .tile").length === 100, null, { timeout: 15000 });
+  await page.evaluate(() => (document.querySelector(".organize-grid").scrollTop = 0));
+  const topThumb = await drawnThumb(page, 1);
+  const topCanvas = await page.evaluateHandle(() => document.querySelector('.organize .tile[data-pos="0"] canvas'));
+  await page.evaluate(() => (document.querySelector(".organize-grid").scrollTop = 99999));
+  await page.waitForSelector(`${tile(100)} canvas`);
+  await page.waitForFunction(() => !document.querySelector('.organize .tile[data-pos="0"] canvas'), null, { timeout: 5000 }).catch(() => {});
+  const kept = await count(page, ".organize .tile canvas");
+  check("previews far from view are let go", (await count(page, `${tile(1)} canvas`)) === 0 && (await topCanvas.evaluate((c) => c.width === 0 && c.height === 0)) && kept < 40, `${kept} of 100 kept`);
+  await page.evaluate(() => (document.querySelector(".organize-grid").scrollTop = 0));
+  await page.waitForSelector(`${tile(1)} canvas`);
+  const redrawn = await page.$eval(`${tile(1)} canvas`, (c, old) => c !== old, topCanvas);
+  check("...and drawn again when scrolled back", redrawn && (await drawnThumb(page, 1)) === topThumb);
+  await closeOrganize(page);
+
   check("desktop: no privacy-lock violations", (await page.evaluate(() => window.__csp)).length === 0);
   check("desktop: no errors or warnings", problems.length === 0, problems.join(" | "));
   await ctx.close();

@@ -10,13 +10,17 @@
  * Everything can be undone.
  */
 import type { EventHub } from "../../core/events";
-import type { PdfDocument } from "../../core/pdf-engine";
+import type { PdfDocument, RenderJob } from "../../core/pdf-engine";
 import { icons } from "../../ui/icons";
 import { isNativeApp, openManyWithSystemDialog } from "../../platform/native";
 
 export interface OrganizeActions {
   doc(): PdfDocument | null;
-  /** A key for page i's look (file, page and rotation), to reuse previews. */
+  /**
+   * A key for page i's look (file, page and rotation), to reuse previews.
+   * Keys are only unique within one open file: call reset() when another
+   * file is opened.
+   */
   pageKey(i: number): string;
   rotate(pages: number[], by: number): void;
   remove(pages: number[]): boolean;
@@ -31,6 +35,10 @@ export interface OrganizeActions {
 
 /** Preview width in CSS pixels. */
 const THUMB_WIDTH = 150;
+/** Previews are drawn when their page comes this close to view... */
+const DRAW_MARGIN = "300px 0px";
+/** ...and let go when it moves this far away, so long files don't fill the memory. */
+const KEEP_MARGIN = "1500px 0px";
 const LONG_PRESS_MS = 350;
 
 interface Press {
@@ -51,8 +59,14 @@ export class OrganizeScreen {
   private readonly fileInput: HTMLInputElement;
   private selection = new Set<number>();
   private lastClicked: number | null = null;
+  /** Previews by pageKey, kept while the screen is closed and across page changes. */
   private thumbs = new Map<string, HTMLCanvasElement>();
+  /** Previews still being drawn. */
+  private drawing = new WeakMap<HTMLCanvasElement, RenderJob>();
+  /** Draws previews coming into view. */
   private observer: IntersectionObserver | null = null;
+  /** Lets go of previews far from view. */
+  private keeper: IntersectionObserver | null = null;
   private press: Press | null = null;
   private ghost: HTMLElement | null = null;
   private dropBefore: number | null = null;
@@ -143,7 +157,18 @@ export class OrganizeScreen {
     this.cancelDrag();
     this.element.hidden = true;
     this.observer?.disconnect();
+    this.keeper?.disconnect();
     this.grid.replaceChildren();
+  }
+
+  /**
+   * Closes the screen and forgets every preview. Called when a different
+   * file is opened, whose pages would otherwise get the old file's previews.
+   */
+  reset(): void {
+    this.close();
+    for (const canvas of this.thumbs.values()) this.release(canvas);
+    this.thumbs.clear();
   }
 
   /** Asks to choose PDFs whose pages are added to the end. */
@@ -166,9 +191,24 @@ export class OrganizeScreen {
     if (!doc) return this.close();
     for (const s of [...this.selection]) if (s >= doc.pageCount) this.selection.delete(s);
     this.observer?.disconnect();
+    this.keeper?.disconnect();
+    // Previews of pages that are no longer in the file (deleted, or turned) aren't needed.
+    const keys = new Set(Array.from({ length: doc.pageCount }, (_, i) => this.actions.pageKey(i)));
+    for (const [key, canvas] of this.thumbs) {
+      if (keys.has(key)) continue;
+      this.release(canvas);
+      this.thumbs.delete(key);
+    }
     this.observer = new IntersectionObserver((entries) => {
-      for (const entry of entries) if (entry.isIntersecting) this.drawThumb(entry.target as HTMLElement);
-    }, { root: this.grid, rootMargin: "300px 0px" });
+      for (const entry of entries) {
+        if (entry.isIntersecting && entry.target.isConnected) this.drawThumb(entry.target as HTMLElement);
+      }
+    }, { root: this.grid, rootMargin: DRAW_MARGIN });
+    this.keeper = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting && entry.target.isConnected) this.letGo(entry.target as HTMLElement);
+      }
+    }, { root: this.grid, rootMargin: KEEP_MARGIN });
 
     const fragment = document.createDocumentFragment();
     for (let i = 0; i < doc.pageCount; i++) {
@@ -192,7 +232,10 @@ export class OrganizeScreen {
       fragment.append(tile);
     }
     this.grid.replaceChildren(fragment);
-    for (const tile of this.grid.children) this.observer.observe(tile);
+    for (const tile of this.grid.children) {
+      this.observer.observe(tile);
+      this.keeper.observe(tile);
+    }
     this.refreshSelection();
   }
 
@@ -206,7 +249,10 @@ export class OrganizeScreen {
     if (!canvas) {
       canvas = document.createElement("canvas");
       const ppp = (THUMB_WIDTH * Math.min(2, window.devicePixelRatio || 1)) / doc.pageSizes[pos].width;
-      doc.renderPage(pos, canvas, ppp).promise.catch(() => {});
+      const job = doc.renderPage(pos, canvas, ppp);
+      const drawn = canvas;
+      this.drawing.set(drawn, job);
+      job.promise.catch(() => {}).then(() => this.drawing.delete(drawn));
       this.thumbs.set(key, canvas);
     } else if (canvas.isConnected) {
       // The same preview is shown elsewhere in the grid: make a copy.
@@ -217,6 +263,28 @@ export class OrganizeScreen {
       canvas = copy;
     }
     thumb.append(canvas);
+  }
+
+  /** Frees the preview of a page that is far from view. It's drawn again if it comes back. */
+  private letGo(tile: HTMLElement): void {
+    const canvas = tile.querySelector<HTMLCanvasElement>(".thumb canvas");
+    if (canvas) this.release(canvas);
+    const key = this.actions.pageKey(Number(tile.dataset.pos));
+    const cached = this.thumbs.get(key);
+    // Keep it if the same preview is still shown elsewhere in the grid.
+    if (cached && !cached.isConnected) {
+      this.release(cached);
+      this.thumbs.delete(key);
+    }
+  }
+
+  /** Stops drawing a preview and frees its memory (a canvas keeps its pixels until its size is 0). */
+  private release(canvas: HTMLCanvasElement): void {
+    this.drawing.get(canvas)?.cancel();
+    this.drawing.delete(canvas);
+    canvas.width = 0;
+    canvas.height = 0;
+    canvas.remove();
   }
 
   private refreshSelection(): void {

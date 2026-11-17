@@ -258,7 +258,8 @@ export class App {
         return;
       }
       const previous = this.current;
-      this.organize.close();
+      // A different file: close Organize pages and forget the old file's previews.
+      this.organize.reset();
       const sources: Source[] = [{ name: file.name, bytes, doc: base }];
       const plan = firstPlan(base);
       const doc = workspaceDocument(sources, plan);
