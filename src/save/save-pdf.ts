@@ -66,6 +66,8 @@ export interface PaintedRect {
   w: number;
   h: number;
   color: string;
+  /** True for the patch over edited words (rather than a redaction box). */
+  patch?: boolean;
 }
 
 export interface RedactionOptions {
@@ -180,7 +182,7 @@ function clearedRects(items: Addition[]): PaintedRect[] {
   const rects: PaintedRect[] = [];
   for (const a of items) {
     if (a.kind === "redact") rects.push({ x: a.x, y: a.y, w: a.width, h: a.height, color: "#000000" });
-    else if (a.kind === "edit") rects.push({ ...a.cover, color: a.coverColor });
+    else if (a.kind === "edit") rects.push({ ...a.cover, color: a.coverColor, patch: true });
   }
   return rects;
 }
@@ -195,7 +197,7 @@ function toArea(r: PaintedRect, toPdf: Matrix): Area {
   ].map(([x, y]) => [a * x + c * y + e, b * x + d * y + f]);
   const xs = corners.map((p) => p[0]);
   const ys = corners.map((p) => p[1]);
-  return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys), color: rgb(r.color) };
+  return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys), color: rgb(r.color), patch: r.patch };
 }
 
 /**
@@ -237,22 +239,35 @@ async function drawAdditions(doc: PDFDocument, additions: Addition[], pageToPdf:
     const ops: PDFOperator[] = [pushGraphicsState(), concatTransformationMatrix(...pageToPdf[index])];
     for (const e of edits) {
       const font = await fonts.get(e);
-      ops.push(...drawEdit(e, font, fonts.keyOn(page, e)));
+      append(ops, drawEdit(e, font, fonts.keyOn(page, e)));
     }
     if (highlights.length > 0) {
       ops.push(pushGraphicsState(), setGraphicsState(multiplyBlend(doc, page)));
-      for (const item of highlights) ops.push(...drawAddition(item as Exclude<Addition, TextBox | TextEdit>));
+      for (const item of highlights) append(ops, drawAddition(item as Exclude<Addition, TextBox | TextEdit>));
       ops.push(popGraphicsState());
     }
     const fontKey = helvetica && ink.some((a) => a.kind === "text") ? page.node.newFontDictionary("PlainPdfHelv", helvetica.ref) : null;
     for (const item of ink) {
-      if (item.kind === "text") ops.push(...drawText(item, helvetica!, fontKey!));
-      else ops.push(...drawAddition(item as Exclude<Addition, TextBox | TextEdit>));
+      if (item.kind === "text") append(ops, drawText(item, helvetica!, fontKey!));
+      else append(ops, drawAddition(item as Exclude<Addition, TextBox | TextEdit>));
     }
     ops.push(popGraphicsState());
-    page.pushOperators(...ops);
+    // A page full of handwriting has many thousands of drawing instructions: hand them over in pieces.
+    for (let at = 0; at < ops.length; at += OPERATORS_PER_PUSH) page.pushOperators(...ops.slice(at, at + OPERATORS_PER_PUSH));
   }
   return redacted;
+}
+
+/**
+ * How many drawing instructions are handed to pdf-lib at a time. A function
+ * can only take so many arguments at once (some tens of thousands), so a
+ * heavily drawn-on page must not be passed in one go.
+ */
+const OPERATORS_PER_PUSH = 2000;
+
+/** Adds `items` to the end of `list` (any number of them, unlike `list.push(...items)`). */
+function append<T>(list: T[], items: readonly T[]): void {
+  for (const item of items) list.push(item);
 }
 
 /** The standard PDF font matching an edit's look (every PDF reader has these built in). */
@@ -427,7 +442,10 @@ function drawSignature(sig: PlacedSignature): PDFOperator[] {
     setLineCap(LineCapStyle.Round),
     setLineJoin(LineJoinStyle.Round),
   ];
-  for (const points of sig.ink.strokes) ops.push(...smoothPathOps(points), stroke());
+  for (const points of sig.ink.strokes) {
+    append(ops, smoothPathOps(points));
+    ops.push(stroke());
+  }
   ops.push(popGraphicsState());
   return ops;
 }

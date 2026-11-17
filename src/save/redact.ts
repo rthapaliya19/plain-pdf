@@ -37,6 +37,12 @@ export interface Area {
   x1: number;
   y1: number;
   color: [number, number, number];
+  /**
+   * True for the patch over edited words (rather than a redaction box). A
+   * redaction box takes out everything it touches, to be safe; a patch only
+   * takes out the words it was made for, so the lines next to them stay whole.
+   */
+  patch?: boolean;
 }
 
 export type RedactResult = { ok: true } | { ok: false; reason: string };
@@ -71,9 +77,17 @@ interface Box {
   y1: number;
 }
 function bounds(points: [number, number][]): Box {
-  const xs = points.map((p) => p[0]);
-  const ys = points.map((p) => p[1]);
-  return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const [x, y] of points) {
+    if (x < x0) x0 = x;
+    if (x > x1) x1 = x;
+    if (y < y0) y0 = y;
+    if (y > y1) y1 = y;
+  }
+  return { x0, y0, x1, y1 };
 }
 function overlap(a: Box, b: Box): { w: number; h: number } {
   return { w: Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0), h: Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0) };
@@ -84,6 +98,70 @@ function touches(a: Box, b: Box, margin = 0.25): boolean {
 }
 function inside(inner: Box, outer: Box, slack = 1): boolean {
   return inner.x0 >= outer.x0 - slack && inner.y0 >= outer.y0 - slack && inner.x1 <= outer.x1 + slack && inner.y1 <= outer.y1 + slack;
+}
+function pointIn(p: [number, number], box: Box, slack = 0): boolean {
+  return p[0] >= box.x0 - slack && p[0] <= box.x1 + slack && p[1] >= box.y0 - slack && p[1] <= box.y1 + slack;
+}
+
+// ---------------------------------------------------------------------------
+// Drawn shapes ("paths"): which parts lie under a box
+// ---------------------------------------------------------------------------
+
+/** One stretch of a shape's outline: a straight line (2 points) or a curve (4 control points). */
+type Segment = [number, number][];
+
+/** One closed or open outline within a shape (a shape can have many: each letter of outlined text is one or two). */
+interface Subpath {
+  /** Byte range of its drawing instructions. */
+  start: number;
+  end: number;
+  points: [number, number][];
+  segments: Segment[];
+  first: [number, number];
+  last: [number, number];
+  curved: boolean;
+}
+
+/**
+ * Where on a letter its "middle" is taken to be, above the line it sits on (as
+ * a fraction of the font size): about half the height of a small letter.
+ */
+const GLYPH_MIDDLE = 0.3;
+
+/** A point on a curve, `t` of the way along (0..1). */
+function curvePoint(c: Segment, t: number): [number, number] {
+  const u = 1 - t;
+  const a = u * u * u;
+  const b = 3 * u * u * t;
+  const d = 3 * u * t * t;
+  const e = t * t * t;
+  return [a * c[0][0] + b * c[1][0] + d * c[2][0] + e * c[3][0], a * c[0][1] + b * c[1][1] + d * c[2][1] + e * c[3][1]];
+}
+
+/**
+ * Lines, triangles and four-sided boxes: shapes too simple to be writing or a
+ * signature. (Rules, underlines, table lines and backgrounds are these.)
+ */
+function isSimpleShape(sub: Subpath): boolean {
+  return !sub.curved && sub.segments.length <= 5;
+}
+
+/**
+ * True if part of a detailed shape (outlined writing, a drawn signature, a
+ * chart line) would stay in the file, hidden under a redaction box: a whole
+ * straight stretch lies under the box, or a curve passes under it.
+ */
+function hidesUnder(sub: Subpath, area: Box): boolean {
+  if (isSimpleShape(sub) || !touches(bounds(sub.points), area)) return false;
+  for (const seg of sub.segments) {
+    if (seg.length === 2) {
+      const length = Math.hypot(seg[1][0] - seg[0][0], seg[1][1] - seg[0][1]);
+      if (length > 0.01 && pointIn(seg[0], area) && pointIn(seg[1], area)) return true;
+    } else {
+      for (let k = 0; k <= 16; k++) if (pointIn(curvePoint(seg, k / 16), area, -0.25)) return true;
+    }
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -680,6 +758,7 @@ export async function redactPage(doc: PDFDocument, page: PDFPage, areas: Area[])
   if (areas.length === 0) return { ok: true };
   const ctx = doc.context;
   page.node.normalize();
+  dropPageLeftovers(page);
   try {
     const contents = page.node.Contents();
     const streams = contents instanceof PDFArray ? contents.asArray().map((x) => ctx.lookup(x)) : [contents];
@@ -799,8 +878,25 @@ async function redactContent(
   const stack: GState[] = [];
   let tm: M = IDENTITY;
   let tlm: M = IDENTITY;
-  let path: { start: number; points: [number, number][]; clip: boolean } | null = null;
-  const areaBoxes: Box[] = areas;
+  // ("as": the helper below starts paths too, which the type checker can't follow.)
+  let path = null as { start: number; subpaths: Subpath[]; clip: boolean } | null;
+  /** The outline being added to (starting one at `point` if there is none yet, or `fresh` is asked for). */
+  const subpathAt = (o: Operation, point: [number, number], fresh: boolean): Subpath => {
+    if (!path) path = { start: o.start, subpaths: [], clip: false };
+    let sub = path.subpaths[path.subpaths.length - 1];
+    if (!sub || fresh) {
+      sub = { start: o.start, end: o.end, points: [point], segments: [], first: point, last: point, curved: false };
+      path.subpaths.push(sub);
+    }
+    return sub;
+  };
+  const extend = (sub: Subpath, o: Operation, segment: Segment) => {
+    sub.segments.push(segment);
+    for (let k = 1; k < segment.length; k++) sub.points.push(segment[k]);
+    sub.last = segment[segment.length - 1];
+    if (segment.length > 2) sub.curved = true;
+    sub.end = o.end;
+  };
 
   /** Shows text; returns the replacement TJ text if any letter was under a box. */
   const show = (items: Value[]): string | null => {
@@ -832,9 +928,11 @@ async function redactContent(
         const gw = Math.max(w0, 0.1);
         const glyph = bounds([apply(trm, 0, font.descent), apply(trm, gw, font.descent), apply(trm, 0, font.ascent), apply(trm, gw, font.ascent)]);
         const invisible = gs.render === 3 || gs.render === 7;
-        const hit = areaBoxes.some((a) => {
+        const hit = areas.some((a) => {
           const o = overlap(glyph, a);
           if (invisible) return o.w > 0.2 && o.h > 0.2;
+          // The patch over edited words: only letters whose middle is under it (never the lines above and below).
+          if (a.patch) return pointIn(apply(trm, gw / 2, GLYPH_MIDDLE), a);
           return o.w >= 0.25 * (glyph.x1 - glyph.x0) && o.h >= 0.25 * (glyph.y1 - glyph.y0) && o.w > 0.1 && o.h > 0.1;
         });
         const space = step === 1 && code === 32 ? gs.wordSpace : 0;
@@ -949,18 +1047,33 @@ async function redactContent(
       case "v":
       case "y":
       case "re": {
-        if (!path) path = { start: o.start, points: [], clip: false };
         const nums = a.map(num);
-        if (o.op === "re") {
+        const at = (k: number) => apply(gs.ctm, nums[k] ?? 0, nums[k + 1] ?? 0);
+        if (o.op === "m") {
+          subpathAt(o, at(0), true);
+        } else if (o.op === "re") {
           const [x, y, w, h] = nums;
-          for (const [px, py] of [[x, y], [x + w, y], [x, y + h], [x + w, y + h]]) path.points.push(apply(gs.ctm, px, py));
+          const corners = [apply(gs.ctm, x, y), apply(gs.ctm, x + w, y), apply(gs.ctm, x + w, y + h), apply(gs.ctm, x, y + h)];
+          const sub = subpathAt(o, corners[0], true);
+          for (let k = 0; k < 4; k++) extend(sub, o, [corners[k], corners[(k + 1) % 4]]);
         } else {
-          for (let k = 0; k + 1 < nums.length; k += 2) path.points.push(apply(gs.ctm, nums[k], nums[k + 1]));
+          const sub = subpathAt(o, at(0), false);
+          const from = sub.last;
+          if (o.op === "l") extend(sub, o, [from, at(0)]);
+          else if (o.op === "c") extend(sub, o, [from, at(0), at(2), at(4)]);
+          else if (o.op === "v") extend(sub, o, [from, from, at(0), at(2)]);
+          else extend(sub, o, [from, at(0), at(2), at(2)]);
         }
         break;
       }
-      case "h":
+      case "h": {
+        const sub = path?.subpaths[path.subpaths.length - 1];
+        if (sub) {
+          if (Math.hypot(sub.last[0] - sub.first[0], sub.last[1] - sub.first[1]) > 1e-6) extend(sub, o, [sub.last, sub.first]);
+          sub.end = o.end;
+        }
         break;
+      }
       case "W":
       case "W*":
         if (path) path.clip = true;
@@ -975,9 +1088,24 @@ async function redactContent(
       case "b":
       case "b*":
       case "n": {
-        if (path && o.op !== "n" && !path.clip && path.points.length > 0) {
-          const box = bounds(path.points);
-          if (areaBoxes.some((area) => inside(box, area))) replacements.push({ start: path.start, end: o.end, text: " " });
+        if (path && o.op !== "n" && !path.clip && path.subpaths.length > 0) {
+          // Outlines lying under a box are taken out; the rest of the shape stays as it was.
+          const under = new Set(
+            path.subpaths.filter((sub) => {
+              const box = bounds(sub.points);
+              return areas.some((area) => inside(box, area));
+            }),
+          );
+          if (under.size === path.subpaths.length) {
+            replacements.push({ start: path.start, end: o.end, text: " " });
+          } else {
+            // A detailed shape only partly under a redaction box can't be cut safely: the page is saved as a picture.
+            for (const sub of path.subpaths) {
+              if (under.has(sub)) continue;
+              if (areas.some((area) => !area.patch && hidesUnder(sub, area))) throw new Unsupported("a drawing partly under a box");
+            }
+            for (const sub of under) replacements.push({ start: sub.start, end: sub.end, text: " " });
+          }
         }
         path = null;
         break;
@@ -1121,6 +1249,15 @@ function removeAnnotations(doc: PDFDocument, page: PDFPage, areas: Area[]): void
 }
 
 /**
+ * Extras a page can carry that show or describe it as it was: a small preview
+ * picture ("Thumb") and private data of the app that made it ("PieceInfo",
+ * which can hold a full copy of the artwork). Dropped from redacted pages.
+ */
+function dropPageLeftovers(page: PDFPage): void {
+  for (const key of ["Thumb", "PieceInfo"]) page.node.delete(PDFName.of(key));
+}
+
+/**
  * pdf-lib remembers the content stream it last drew into for each page (for
  * example when form answers were locked in). After the page's instructions are
  * replaced, that stream isn't part of the page any more, so it's forgotten and
@@ -1141,6 +1278,10 @@ export function forgetContentStream(page: PDFPage): void {
 export async function replaceWithPicture(doc: PDFDocument, page: PDFPage, toPdf: M, picture: { jpeg: Uint8Array; width: number; height: number }): Promise<void> {
   const ctx = doc.context;
   page.node.normalize();
+  dropPageLeftovers(page);
+  // A fresh, empty list of what the page uses. The old list named the page's original
+  // pictures, drawings and fonts, which would otherwise stay in the file (unseen, but recoverable).
+  page.node.set(PDFName.of("Resources"), ctx.obj({ Font: {}, XObject: {}, ExtGState: {} }));
   const image = await doc.embedJpg(picture.jpeg);
   const name = page.node.newXObject("PlainPdfPagePicture", image.ref);
   const m = mul([picture.width, 0, 0, -picture.height, 0, picture.height], toPdf);

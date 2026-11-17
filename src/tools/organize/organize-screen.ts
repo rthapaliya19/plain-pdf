@@ -146,6 +146,18 @@ export class OrganizeScreen {
     this.grid.replaceChildren();
   }
 
+  /**
+   * Forgets the page previews (when a different file is opened). They are
+   * remembered by file and page number, which mean other pages in another file.
+   */
+  forgetPreviews(): void {
+    for (const canvas of this.thumbs.values()) {
+      canvas.width = 0;
+      canvas.height = 0;
+    }
+    this.thumbs.clear();
+  }
+
   /** Asks to choose PDFs whose pages are added to the end. */
   chooseFilesToAdd(): void {
     if (isNativeApp) {

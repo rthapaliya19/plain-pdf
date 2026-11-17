@@ -3,7 +3,8 @@
  *
  * The old words are covered by a patch in the paper's colour, and the new
  * words are written on top in a matching style (see TextEdit in
- * core/additions.ts). The old words stay in the file underneath, only hidden.
+ * core/additions.ts). When a copy is saved, the old words under the patch are
+ * removed from it for good (see save/redact.ts).
  *
  * - On pages with real text, an edit starts from one line (a tap) or several
  *   lines (a drag); a paragraph rewraps to its original width.
@@ -127,7 +128,7 @@ export type EditResult = Omit<TextEdit, "id" | "order" | "kind">;
 
 const HINT_KEY = "plain-pdf:edit-hint-shown";
 
-/** Shows the one-time reminder that covered words are still in the file. */
+/** Whether to show the one-time reminder about what happens to the covered words when saving. */
 export function shouldShowEditHint(): boolean {
   try {
     if (localStorage.getItem(HINT_KEY)) return false;

@@ -259,6 +259,7 @@ export class App {
       }
       const previous = this.current;
       this.organize.close();
+      this.organize.forgetPreviews();
       const sources: Source[] = [{ name: file.name, bytes, doc: base }];
       const plan = firstPlan(base);
       const doc = workspaceDocument(sources, plan);
