@@ -187,8 +187,8 @@ An audit (reading all the code, the 521 checks, and new stress tests: a 3,000-pa
 
 - [x] Audit fixes built and tested (556 checks), on branch `claude/sharp-mendel-r4kgeo` (see `docs/HANDOFF.md` for the details and next steps)
 - [x] Merged into main so the preview updates (owner's request, 2026-11-17)
-- [ ] Owner tries the preview
-- [ ] Release
+- [x] 1.3.2: owner asked to release (2026-11-17)
+- [ ] 1.3.2: apps released for Windows, Mac and Android
 
 Found by the audit and still open (advice, not yet agreed):
 
