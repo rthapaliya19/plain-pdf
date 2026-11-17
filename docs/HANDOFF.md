@@ -5,7 +5,7 @@ For whoever picks this up next (person or AI). Read this first, then `docs/PLAN.
 ## Where things stand (2026-11-17)
 
 - Released: 1.3.1 (Windows, Mac, Android). The `release` branch builds and publishes the apps; `main` publishes the web preview.
-- Work branch: `claude/sharp-mendel-r4kgeo`. It holds the audit fixes below, **not merged and not released**. The owner decides when to try the preview and release (it would be 1.3.2).
+- The audit fixes below were made on `claude/sharp-mendel-r4kgeo` and **merged into `main` on 2026-11-17** (owner asked), so the web preview has them. **Not released**: the installed apps are still 1.3.1. The owner tries the preview, then decides on releasing 1.3.2.
 - All 14 test files pass: 556 checks (521 old + 35 new in `tests/e2e/audit.test.cjs`).
 
 ## What was done on this branch
@@ -24,8 +24,8 @@ New test material: `tests/fixtures/make-audit-cases.cjs` makes `tests/fixtures/a
 
 ## Next steps, in order
 
-1. Commit and push are done on the work branch. The owner tries it (the web preview only updates from `main`, so they would need it merged, or a local `npm run preview`).
-2. If approved: merge to `main`, bump the version to 1.3.2 in `package.json`, `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml` (commit "Version 1.3.2"), push to `release`, then update `docs/PLAN.md` progress.
+1. Done: fixes merged into `main`; the preview workflow (`.github/workflows/preview.yml`) publishes it to GitHub Pages. Waiting for the owner to try it.
+2. If approved: bump the version to 1.3.2 in `package.json`, `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml` (commit "Version 1.3.2"), push to `release`, then update `docs/PLAN.md` progress.
 3. Remaining audit findings, not yet agreed with the owner (listed at the end of `docs/PLAN.md`). The most useful next ones:
    - Rotating, deleting or reordering pages drops the chapter list: `saveWorkspace` in `src/save/save-pdf.ts` rebuilds the file with `copyPages`. Better: change page order and rotation inside the loaded original when there's one source.
    - Saved filled forms contain dangling references to removed field objects (poppler prints "Invalid XRef entry"). Comes from `lockFormAnswers` (`form.flatten`) leaving `/Annots` entries pointing at deleted widgets.

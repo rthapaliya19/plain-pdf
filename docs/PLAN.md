@@ -186,6 +186,7 @@ An audit (reading all the code, the 521 checks, and new stress tests: a 3,000-pa
 | 5 | Editing one line of tightly spaced text removed the line below from the saved copy (the screen looked right). | The patch over edited words only removes letters whose middle is under it; redaction boxes keep the wider rule. |
 
 - [x] Audit fixes built and tested (556 checks), on branch `claude/sharp-mendel-r4kgeo` (see `docs/HANDOFF.md` for the details and next steps)
+- [x] Merged into main so the preview updates (owner's request, 2026-11-17)
 - [ ] Owner tries the preview
 - [ ] Release
 
