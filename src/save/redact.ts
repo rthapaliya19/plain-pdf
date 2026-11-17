@@ -5,13 +5,18 @@
  * - text: each letter under a box is taken out of the page's drawing
  *   instructions, and the rest of the line stays exactly where it was;
  * - pictures: the pixels under a box are painted over (in the box's colour);
- * - drawn shapes lying inside a box are taken out;
+ * - drawn shapes: those inside a box are taken out, and straight lines and
+ *   rectangles crossing a box are cut where they meet it;
  * - links, notes and form fields over a box are removed;
- * - hidden "ActualText" copies of words on the page are dropped.
+ * - hidden "ActualText" copies of words on the page are dropped, and so are
+ *   stored copies of the page (its thumbnail, and apps' private data).
  * Pictures and drawings that other pages also use are copied first, so the
- * other pages aren't affected. When something can't be handled safely (an
- * unusual font or picture format), the page is reported as needing to be
- * saved as a picture instead, which the caller does.
+ * other pages aren't affected. The result is then read back and checked.
+ * When something can't be handled safely (an unusual font or picture format,
+ * a curve crossing a box), or the check finds anything left under a box, the
+ * page is reported as needing to be saved as a picture instead, which the
+ * caller does (replaceWithPicture). At the end, finishRedaction clears
+ * everything the redacted pages no longer use out of the file.
  */
 import {
   PDFArray,
@@ -657,7 +662,7 @@ async function paintImage(doc: PDFDocument, image: PDFStream, ctm: M, areas: Are
 }
 
 // ---------------------------------------------------------------------------
-// The page
+// Following the drawing state through the instructions
 // ---------------------------------------------------------------------------
 
 interface GState {
@@ -670,37 +675,648 @@ interface GState {
   leading: number;
   rise: number;
   render: number;
+  dash: number[];
+  dashPhase: number;
+}
+
+function initialState(): GState {
+  return { ctm: IDENTITY, font: null, size: 0, charSpace: 0, wordSpace: 0, scale: 1, leading: 0, rise: 0, render: 0, dash: [], dashPhase: 0 };
+}
+
+type P = [number, number];
+/** One piece of an outline, in the shape's own coordinates: a straight line to pts[0], or a curve (pts: two control points, then the end). */
+interface Seg {
+  curve: boolean;
+  pts: P[];
+}
+interface Subpath {
+  start: P;
+  segs: Seg[];
+  closed: boolean;
+  /** Set for outlines drawn with "re" (x, y, width, height). */
+  rect?: [number, number, number, number];
+}
+/** A shape being built: its outlines, where its instructions start, its transform, and whether it also clips. */
+interface Shape {
+  start: number;
+  ctm: M;
+  subs: Subpath[];
+  cur: P;
+  clip: "W" | "W*" | null;
+}
+/** One letter shown on the page. */
+interface Glyph {
+  bytes: number[];
+  box: Box;
+  advance: number;
+  invisible: boolean;
+}
+
+/** Follows the graphics state, the text position and the shape being built through a stream's operations. */
+class Tracker {
+  gs: GState;
+  /** The shape built so far; whoever handles the painting operation takes it (sets this to null). */
+  shape: Shape | null = null;
+  private stack: GState[] = [];
+  private tm: M = IDENTITY;
+  private tlm: M = IDENTITY;
+
+  constructor(
+    start: GState,
+    private fontNamed: (name: string) => FontInfo,
+  ) {
+    this.gs = { ...start };
+  }
+
+  /** Updates the state for an operation (for ' and ", the move to the next line that comes before the words). */
+  update(o: Operation): void {
+    const a = o.args;
+    const gs = this.gs;
+    switch (o.op) {
+      case "q":
+        this.stack.push({ ...gs });
+        break;
+      case "Q":
+        if (this.stack.length) this.gs = this.stack.pop()!;
+        break;
+      case "cm":
+        if (a.length >= 6) gs.ctm = mul(a.slice(0, 6).map(num) as M, gs.ctm);
+        break;
+      case "d":
+        gs.dash = Array.isArray(a[0]) ? a[0].map(num) : [];
+        gs.dashPhase = num(a[1]);
+        break;
+      case "BT":
+        this.tm = this.tlm = IDENTITY;
+        break;
+      case "Tc":
+        gs.charSpace = num(a[0]);
+        break;
+      case "Tw":
+        gs.wordSpace = num(a[0]);
+        break;
+      case "Tz":
+        gs.scale = num(a[0]) / 100;
+        break;
+      case "TL":
+        gs.leading = num(a[0]);
+        break;
+      case "Ts":
+        gs.rise = num(a[0]);
+        break;
+      case "Tr":
+        gs.render = num(a[0]);
+        break;
+      case "Tf":
+        if (isName(a[0])) gs.font = this.fontNamed(a[0].name);
+        gs.size = num(a[1]);
+        break;
+      case "Td":
+        this.tlm = mul([1, 0, 0, 1, num(a[0]), num(a[1])], this.tlm);
+        this.tm = this.tlm;
+        break;
+      case "TD":
+        gs.leading = -num(a[1]);
+        this.tlm = mul([1, 0, 0, 1, num(a[0]), num(a[1])], this.tlm);
+        this.tm = this.tlm;
+        break;
+      case "Tm":
+        this.tlm = this.tm = a.slice(0, 6).map(num) as M;
+        break;
+      case "T*":
+      case "'":
+        this.nextLine();
+        break;
+      case '"':
+        gs.wordSpace = num(a[0]);
+        gs.charSpace = num(a[1]);
+        this.nextLine();
+        break;
+      case "m":
+      case "l":
+      case "c":
+      case "v":
+      case "y":
+      case "re":
+      case "h":
+        this.build(o);
+        break;
+      case "W":
+      case "W*":
+        if (this.shape) this.shape.clip = o.op;
+        break;
+      default:
+        break;
+    }
+  }
+
+  private nextLine(): void {
+    this.tlm = mul([1, 0, 0, 1, 0, -this.gs.leading], this.tlm);
+    this.tm = this.tlm;
+  }
+
+  private build(o: Operation): void {
+    const n = (k: number) => num(o.args[k]);
+    if (!this.shape) this.shape = { start: o.start, ctm: this.gs.ctm, subs: [], cur: [0, 0], clip: null };
+    const s = this.shape;
+    // A line or curve after a closed outline (or with no "m" first) starts a new outline at the current point.
+    const open = (): Subpath => {
+      const last = s.subs[s.subs.length - 1];
+      if (last && !last.closed) return last;
+      const sub: Subpath = { start: s.cur, segs: [], closed: false };
+      s.subs.push(sub);
+      return sub;
+    };
+    switch (o.op) {
+      case "m":
+        s.cur = [n(0), n(1)];
+        s.subs.push({ start: s.cur, segs: [], closed: false });
+        break;
+      case "l":
+        open().segs.push({ curve: false, pts: [[n(0), n(1)]] });
+        s.cur = [n(0), n(1)];
+        break;
+      case "c":
+        open().segs.push({ curve: true, pts: [[n(0), n(1)], [n(2), n(3)], [n(4), n(5)]] });
+        s.cur = [n(4), n(5)];
+        break;
+      case "v": {
+        const from = s.cur;
+        open().segs.push({ curve: true, pts: [from, [n(0), n(1)], [n(2), n(3)]] });
+        s.cur = [n(2), n(3)];
+        break;
+      }
+      case "y":
+        open().segs.push({ curve: true, pts: [[n(0), n(1)], [n(2), n(3)], [n(2), n(3)]] });
+        s.cur = [n(2), n(3)];
+        break;
+      case "re": {
+        const [x, y, w, h] = [n(0), n(1), n(2), n(3)];
+        const corners: P[] = [[x + w, y], [x + w, y + h], [x, y + h]];
+        s.subs.push({ start: [x, y], segs: corners.map((p) => ({ curve: false, pts: [p] })), closed: true, rect: [x, y, w, h] });
+        s.cur = [x, y];
+        break;
+      }
+      case "h": {
+        const last = s.subs[s.subs.length - 1];
+        if (last && !last.closed) {
+          last.closed = true;
+          s.cur = last.start;
+        }
+        break;
+      }
+    }
+  }
+
+  /** Walks the letters of a text-showing operation, moving along the line; TJ's spacing numbers go to onNumber. */
+  show(items: Value[], onGlyph: (g: Glyph) => void, onNumber: (n: number) => void = () => {}): void {
+    const font = this.gs.font;
+    if (!font) throw new Unsupported("text without a font");
+    const th = this.gs.scale;
+    const fs = this.gs.size;
+    for (const item of items) {
+      if (typeof item === "number") {
+        onNumber(item);
+        this.tm = mul([1, 0, 0, 1, (-item / 1000) * fs * th, 0], this.tm);
+        continue;
+      }
+      if (!isStr(item)) continue;
+      const bytes = item.str;
+      const step = font.twoByte ? 2 : 1;
+      for (let k = 0; k + step <= bytes.length; k += step) {
+        const code = step === 2 ? (bytes[k] << 8) | bytes[k + 1] : bytes[k];
+        const w0 = font.width(code);
+        const trm = mul([fs * th, 0, 0, fs, 0, this.gs.rise], mul(this.tm, this.gs.ctm));
+        const gw = Math.max(w0, 0.1);
+        const box = bounds([apply(trm, 0, font.descent), apply(trm, gw, font.descent), apply(trm, 0, font.ascent), apply(trm, gw, font.ascent)]);
+        const space = step === 1 && code === 32 ? this.gs.wordSpace : 0;
+        const advance = (w0 * fs + this.gs.charSpace + space) * th;
+        onGlyph({ bytes: Array.from(bytes.subarray(k, k + step)), box, advance, invisible: this.gs.render === 3 || this.gs.render === 7 });
+        this.tm = mul([1, 0, 0, 1, advance, 0], this.tm);
+      }
+    }
+  }
+}
+
+/** The strings (and TJ spacing) a text-showing operation shows. */
+function textItems(o: Operation): Value[] {
+  if (o.op === "TJ") return Array.isArray(o.args[0]) ? o.args[0] : [];
+  if (o.op === "Tj") return [o.args[0]];
+  return [o.args[o.args.length - 1]];
+}
+
+/** Whether a letter counts as under a box (invisible letters, such as OCR text on scans, at the slightest touch). */
+function glyphHit(g: Glyph, areas: Box[]): boolean {
+  return areas.some((a) => {
+    const o = overlap(g.box, a);
+    if (g.invisible) return o.w > 0.2 && o.h > 0.2;
+    return o.w >= 0.25 * (g.box.x1 - g.box.x0) && o.h >= 0.25 * (g.box.y1 - g.box.y0) && o.w > 0.1 && o.h > 0.1;
+  });
+}
+
+/** Reads (once each) the fonts a resource list names. */
+function fontLookup(doc: PDFDocument, resources: PDFDict): (name: string) => FontInfo {
+  const fonts = new Map<string, FontInfo>();
+  const dict = resources.lookup(PDFName.of("Font"));
+  return (name) => {
+    if (!fonts.has(name)) {
+      const fd = dict instanceof PDFDict ? dict.lookup(PDFName.of(name)) : undefined;
+      if (!(fd instanceof PDFDict)) throw new Unsupported(`missing font ${name}`);
+      fonts.set(name, readFont(doc, fd));
+    }
+    return fonts.get(name)!;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Shapes: whatever part lies under a box is cut away
+// ---------------------------------------------------------------------------
+//
+// An outline lying inside a box is dropped. One that only crosses a box is cut, so none of its
+// coordinates under the box remain: straight lines are shortened to where they meet the box, and
+// filled rectangles are split into the rectangles around it (exactly the same look outside the box).
+// Curves crossing a box, and filled shapes that aren't rectangles, can't be cut this simply, so the
+// page is then saved as a picture. Shapes whose edges never come under a box (a page-sized
+// background, say) stay as they are: under the box they're one plain colour, which tells nothing.
+
+/** How far (in points) an edge must reach into a box to count as under it. Cuts are made this far inside the box. */
+const EPS = 0.01;
+
+const PAINT: Record<string, { fill: "f" | "f*" | null; stroke: boolean; close: boolean }> = {
+  S: { fill: null, stroke: true, close: false },
+  s: { fill: null, stroke: true, close: true },
+  f: { fill: "f", stroke: false, close: false },
+  F: { fill: "f", stroke: false, close: false },
+  "f*": { fill: "f*", stroke: false, close: false },
+  B: { fill: "f", stroke: true, close: false },
+  "B*": { fill: "f*", stroke: true, close: false },
+  b: { fill: "f", stroke: true, close: true },
+  "b*": { fill: "f*", stroke: true, close: true },
+  n: { fill: null, stroke: false, close: false },
+};
+
+/** Whether two boxes meet at all (sharing an edge or a corner counts). */
+function touchesAtAll(a: Box, b: Box): boolean {
+  const o = overlap(a, b);
+  return o.w >= 0 && o.h >= 0;
+}
+
+function shrink(a: Box, d: number): Box {
+  return { x0: a.x0 + d, y0: a.y0 + d, x1: a.x1 - d, y1: a.y1 - d };
+}
+const endOf = (s: Seg): P => s.pts[s.pts.length - 1];
+const lerp = (p: P, q: P, t: number): P => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t];
+
+/** The pieces of an outline, each with where it starts; with `close`, the line back to the start too. */
+function edges(sub: Subpath, close: boolean): { from: P; seg: Seg }[] {
+  const out: { from: P; seg: Seg }[] = [];
+  let from = sub.start;
+  for (const seg of sub.segs) {
+    out.push({ from, seg });
+    from = endOf(seg);
+  }
+  if (close && (from[0] !== sub.start[0] || from[1] !== sub.start[1])) out.push({ from, seg: { curve: false, pts: [sub.start] } });
+  return out;
+}
+
+/** The part (from t0 to t1, 0 to 1 along it) of the line p→q inside box a, if any. */
+function lineInside(p: P, q: P, a: Box): [number, number] | null {
+  let t0 = 0;
+  let t1 = 1;
+  const dx = q[0] - p[0];
+  const dy = q[1] - p[1];
+  const sides: [number, number][] = [[-dx, p[0] - a.x0], [dx, a.x1 - p[0]], [-dy, p[1] - a.y0], [dy, a.y1 - p[1]]];
+  for (const [pp, qq] of sides) {
+    if (pp === 0) {
+      if (qq < 0) return null;
+    } else if (pp < 0) t0 = Math.max(t0, qq / pp);
+    else t1 = Math.min(t1, qq / pp);
+  }
+  return t1 > t0 ? [t0, t1] : null;
+}
+
+function splitCurve([p0, p1, p2, p3]: P[]): [P[], P[]] {
+  const a = lerp(p0, p1, 0.5);
+  const b = lerp(p1, p2, 0.5);
+  const c = lerp(p2, p3, 0.5);
+  const d = lerp(a, b, 0.5);
+  const e = lerp(b, c, 0.5);
+  const f = lerp(d, e, 0.5);
+  return [[p0, a, d, f], [f, e, c, p3]];
+}
+
+/** Whether a curve (four points, in page coordinates) reaches inside box a. */
+function curveInside(p: P[], a: Box, depth = 0): boolean {
+  const b = bounds(p);
+  if (b.x1 <= a.x0 || b.x0 >= a.x1 || b.y1 <= a.y0 || b.y0 >= a.y1) return false;
+  if (b.x0 > a.x0 && b.x1 < a.x1 && b.y0 > a.y0 && b.y1 < a.y1) return true;
+  if (depth >= 16) return [p[0], p[3]].some(([x, y]) => x > a.x0 && x < a.x1 && y > a.y0 && y < a.y1);
+  const [l, r] = splitCurve(p);
+  return curveInside(l, a, depth + 1) || curveInside(r, a, depth + 1);
+}
+
+/** Whether an outline piece reaches inside any of the boxes (in page coordinates). */
+function segInside(from: P, seg: Seg, ctm: M, areas: Box[]): boolean {
+  const dev = (p: P) => apply(ctm, p[0], p[1]);
+  if (seg.curve) {
+    const pts = [from, ...seg.pts].map(dev);
+    return areas.some((a) => curveInside(pts, a));
+  }
+  return areas.some((a) => lineInside(dev(from), dev(seg.pts[0]), a) !== null);
+}
+
+function segLength(from: P, seg: Seg): number {
+  if (!seg.curve) return Math.hypot(seg.pts[0][0] - from[0], seg.pts[0][1] - from[1]);
+  const [p0, p1, p2, p3] = [from, ...seg.pts];
+  let len = 0;
+  let prev = p0;
+  for (let k = 1; k <= 16; k++) {
+    const t = k / 16;
+    const u = 1 - t;
+    const pt: P = [0, 1].map((i) => u * u * u * p0[i] + 3 * u * u * t * p1[i] + 3 * u * t * t * p2[i] + t * t * t * p3[i]) as P;
+    len += Math.hypot(pt[0] - prev[0], pt[1] - prev[1]);
+    prev = pt;
+  }
+  return len;
+}
+
+/** The parts (0 to 1 along it) of the line p→q outside all the boxes. */
+function outsideParts(p: P, q: P, areas: Box[]): [number, number][] {
+  const cuts = areas.map((a) => lineInside(p, q, a)).filter((c): c is [number, number] => c !== null).sort((x, y) => x[0] - y[0]);
+  const out: [number, number][] = [];
+  let t = 0;
+  for (const [c0, c1] of cuts) {
+    if (c0 - t > 1e-9) out.push([t, c0]);
+    t = Math.max(t, c1);
+  }
+  if (1 - t > 1e-9) out.push([t, 1]);
+  return out;
+}
+
+/** A stretch of outline left after cutting, and how far along its outline it starts (for dashed lines). */
+interface Piece {
+  dist: number;
+  start: P;
+  segs: Seg[];
 }
 
 /**
- * Removes what lies under `areas` from `page` (see the top of this file).
- * Returns ok: false (changing nothing that matters) if the page should be saved as a picture instead.
+ * What's left of a stroked outline once the parts under the boxes are cut away. With `joinEnds`, a closed
+ * outline cut away from its starting point gets its two ends joined there again, so that corner looks the same.
  */
-export async function redactPage(doc: PDFDocument, page: PDFPage, areas: Area[]): Promise<RedactResult> {
+function strokePieces(sub: Subpath, ctm: M, areas: Box[], joinEnds: boolean): Piece[] {
+  const dev = (p: P) => apply(ctm, p[0], p[1]);
+  const pieces: Piece[] = [];
+  let cur: Piece | null = null;
+  let dist = 0;
+  let first = true;
+  let fromStart = false;
+  for (const { from, seg } of edges(sub, sub.closed)) {
+    const len = segLength(from, seg);
+    if (seg.curve) {
+      if (segInside(from, seg, ctm, areas)) throw new Unsupported("a curved line partly under a box");
+      if (!cur) {
+        cur = { dist, start: from, segs: [] };
+        if (first) fromStart = true;
+      }
+      cur.segs.push(seg);
+    } else {
+      const to = seg.pts[0];
+      const parts = outsideParts(dev(from), dev(to), areas);
+      if (parts.length === 0 && cur) {
+        pieces.push(cur);
+        cur = null;
+      }
+      for (const [t0, t1] of parts) {
+        if (t0 > 0 || !cur) {
+          if (cur) pieces.push(cur);
+          cur = { dist: dist + t0 * len, start: t0 === 0 ? from : lerp(from, to, t0), segs: [] };
+          if (first && t0 === 0) fromStart = true;
+        }
+        cur.segs.push({ curve: false, pts: [t1 === 1 ? to : lerp(from, to, t1)] });
+        if (t1 < 1) {
+          pieces.push(cur);
+          cur = null;
+        }
+      }
+    }
+    first = false;
+    dist += len;
+  }
+  if (cur) pieces.push(cur);
+  if (joinEnds && sub.closed && cur && fromStart && pieces.length >= 2) {
+    const last = pieces.pop()!;
+    pieces[0] = { dist: last.dist, start: last.start, segs: [...last.segs, ...pieces[0].segs] };
+  }
+  return pieces;
+}
+
+/** A rectangular outline as a box (in its own coordinates), and its direction (so filling rules work out the same). */
+function rectOf(sub: Subpath): { box: Box; sx: number; sy: number } | null {
+  if (sub.rect) {
+    const [x, y, w, h] = sub.rect;
+    return { box: { x0: Math.min(x, x + w), y0: Math.min(y, y + h), x1: Math.max(x, x + w), y1: Math.max(y, y + h) }, sx: w < 0 ? -1 : 1, sy: h < 0 ? -1 : 1 };
+  }
+  if (sub.segs.some((s) => s.curve)) return null;
+  let pts = [sub.start, ...sub.segs.map(endOf)];
+  if (pts.length === 5 && pts[4][0] === pts[0][0] && pts[4][1] === pts[0][1]) pts = pts.slice(0, 4);
+  if (pts.length !== 4) return null;
+  const level = (i: number) => pts[i][1] === pts[(i + 1) % 4][1];
+  const upright = (i: number) => pts[i][0] === pts[(i + 1) % 4][0];
+  if (!((level(0) && upright(1) && level(2) && upright(3)) || (upright(0) && level(1) && upright(2) && level(3)))) return null;
+  let area = 0;
+  for (let i = 0; i < 4; i++) area += pts[i][0] * pts[(i + 1) % 4][1] - pts[(i + 1) % 4][0] * pts[i][1];
+  return { box: bounds(pts), sx: 1, sy: area < 0 ? -1 : 1 };
+}
+
+/** Rectangle r without box a: up to four rectangles (left, right, below, above). */
+function subtract(r: Box, a: Box): Box[] {
+  if (a.x1 <= r.x0 || a.x0 >= r.x1 || a.y1 <= r.y0 || a.y0 >= r.y1) return [r];
+  const mx0 = Math.max(r.x0, a.x0);
+  const mx1 = Math.min(r.x1, a.x1);
+  const pieces: Box[] = [];
+  if (a.x0 > r.x0) pieces.push({ x0: r.x0, y0: r.y0, x1: a.x0, y1: r.y1 });
+  if (a.x1 < r.x1) pieces.push({ x0: a.x1, y0: r.y0, x1: r.x1, y1: r.y1 });
+  if (a.y0 > r.y0) pieces.push({ x0: mx0, y0: r.y0, x1: mx1, y1: a.y0 });
+  if (a.y1 < r.y1) pieces.push({ x0: mx0, y0: a.y1, x1: mx1, y1: r.y1 });
+  return pieces.filter((p) => p.x1 >= p.x0 && p.y1 >= p.y0 && (p.x1 > p.x0 || p.y1 > p.y0));
+}
+
+/** Whether a transform keeps upright rectangles upright (no turning other than by quarter turns, no slanting). */
+function axisAligned(m: M): boolean {
+  const s = Math.abs(m[0]) + Math.abs(m[1]) + Math.abs(m[2]) + Math.abs(m[3]);
+  return Math.abs(m[1]) + Math.abs(m[2]) <= 1e-9 * s || Math.abs(m[0]) + Math.abs(m[3]) <= 1e-9 * s;
+}
+
+/** A coordinate, finer than fmt (shapes may be drawn at any scale). */
+const fmtP = (x: number) => {
+  const r = Math.round(x * 1e6) / 1e6;
+  return Math.abs(r) < 1e-9 ? "0" : String(r);
+};
+const writePt = (p: P) => `${fmtP(p[0])} ${fmtP(p[1])}`;
+function writeSegs(start: P, segs: Seg[]): string {
+  return [`${writePt(start)} m`, ...segs.map((s) => (s.curve ? `${s.pts.map(writePt).join(" ")} c` : `${writePt(s.pts[0])} l`))].join(" ");
+}
+function writeSub(sub: Subpath): string {
+  if (sub.rect) return `${sub.rect.map(fmtP).join(" ")} re`;
+  return writeSegs(sub.start, sub.segs) + (sub.closed ? " h" : "");
+}
+function writeRect(b: Box, sx: number, sy: number): string {
+  return `${fmtP(sx > 0 ? b.x0 : b.x1)} ${fmtP(sy > 0 ? b.y0 : b.y1)} ${fmtP(sx * (b.x1 - b.x0))} ${fmtP(sy * (b.y1 - b.y0))} re`;
+}
+
+/** Painting operators that close the last outline first (s, b, b*) do so before it's looked at. */
+function closeForPainting(shape: Shape, op: string): void {
+  if (PAINT[op].close && shape.subs.length) shape.subs[shape.subs.length - 1].closed = true;
+}
+
+/**
+ * The instructions to draw (and paint, as `op` does) what's left of a shape once everything under the
+ * boxes is cut away, or null if no part of it is under a box. Throws Unsupported when that can't be done
+ * exactly (curves crossing a box, filled shapes other than rectangles crossing a box).
+ */
+function cutShape(shape: Shape, op: string, areas: Box[], gs: GState): string | null {
+  const paint = PAINT[op];
+  closeForPainting(shape, op);
+  const { subs, ctm } = shape;
+  const dev = (p: P) => apply(ctm, p[0], p[1]);
+  const pointsOf = (s: Subpath) => [s.start, ...s.segs.flatMap((g) => g.pts)].map(dev);
+  const all = subs.flatMap(pointsOf);
+  if (all.length === 0) return null;
+  const whole = bounds(all);
+  if (!areas.some((a) => touchesAtAll(whole, a))) return null;
+  // A shape that's built and then thrown away ("n" without clipping) changes nothing: drop it.
+  if (!paint.fill && !paint.stroke && !shape.clip) return " ";
+
+  const near = areas.map((a) => shrink(a, EPS));
+  const isArea = paint.fill !== null || shape.clip !== null;
+  const within = subs.map((s) => areas.some((a) => inside(bounds(pointsOf(s)), a)));
+  const enters = (s: Subpath, close: boolean) => edges(s, close).some((e) => segInside(e.from, e.seg, ctm, near));
+  const fillState = subs.map((s, i) => (within[i] ? "drop" : isArea && enters(s, true) ? "cut" : "keep"));
+  const strokeState = subs.map((s, i) => (within[i] ? "drop" : paint.stroke && enters(s, s.closed) ? "cut" : "keep"));
+  if (!subs.some((_, i) => (isArea && fillState[i] !== "keep") || (paint.stroke && strokeState[i] !== "keep"))) return null;
+
+  // The area (for filling and clipping): rectangles crossing a box are split around it.
+  const areaParts: string[] = [];
+  let lone: { pieces: Box[]; sx: number; sy: number } | null = null;
+  if (isArea) {
+    let userAreas: Box[] | null = null;
+    for (let i = 0; i < subs.length; i++) {
+      const s = subs[i];
+      if (fillState[i] === "keep") areaParts.push(writeSub(s));
+      if (fillState[i] !== "cut") continue;
+      const r = rectOf(s);
+      const inv = axisAligned(ctm) ? invert(ctm) : null;
+      if (!r || !inv) throw new Unsupported("a shape partly under a box");
+      userAreas ??= near.map((a) => bounds([apply(inv, a.x0, a.y0), apply(inv, a.x1, a.y0), apply(inv, a.x0, a.y1), apply(inv, a.x1, a.y1)]));
+      let pieces = [r.box];
+      for (const a of userAreas) pieces = pieces.flatMap((p) => subtract(p, a));
+      for (const p of pieces) areaParts.push(writeRect(p, r.sx, r.sy));
+      if (subs.length === 1) lone = { pieces, sx: r.sx, sy: r.sy };
+    }
+  }
+  // A lone rectangle (a rule drawn as a thin filled bar, say) cut into pieces that don't touch: each is filled on
+  // its own, like the original, since some readers draw a lone rectangle specially (lined up with the pixels).
+  if (lone && paint.fill && !paint.stroke && !shape.clip && lone.pieces.every((p, i) => lone.pieces.every((q, j) => i === j || !touchesAtAll(p, q)))) {
+    const { pieces, sx, sy } = lone;
+    return ` ${pieces.map((p) => `${writeRect(p, sx, sy)} ${paint.fill}`).join(" ")} `;
+  }
+
+  // The lines: shortened to where they meet a box. Dashed lines keep their dashes in step after a cut.
+  const strokeOps: string[] = [];
+  if (paint.stroke) {
+    const dashed = gs.dash.some((x) => x > 0);
+    const together: string[] = [];
+    const apart: Piece[] = [];
+    subs.forEach((s, i) => {
+      if (strokeState[i] === "keep") together.push(writeSub(s));
+      if (strokeState[i] !== "cut") return;
+      for (const p of strokePieces(s, ctm, near, !dashed)) {
+        if (dashed) apart.push(p);
+        else together.push(writeSegs(p.start, p.segs));
+      }
+    });
+    if (together.length) strokeOps.push(`${together.join(" ")} S`);
+    if (apart.length) {
+      const dash = (phase: number) => `[${gs.dash.map(fmtP).join(" ")}] ${fmtP(phase)} d`;
+      for (const p of apart) strokeOps.push(`${dash(gs.dashPhase + p.dist)} ${writeSegs(p.start, p.segs)} S`);
+      strokeOps.push(dash(gs.dashPhase));
+    }
+  }
+
+  const geometry = areaParts.join(" ");
+  const out: string[] = [];
+  if (paint.fill && geometry) out.push(`${geometry} ${paint.fill}`);
+  out.push(...strokeOps);
+  // Clipping comes last, so it limits what's drawn afterwards, as before. With nothing left, it clips everything.
+  if (shape.clip) out.push(`${geometry || "0 0 0 0 re"} ${shape.clip} n`);
+  return ` ${out.join(" ")} `;
+}
+
+/** Whether any part of a shape (as `op` paints or clips it) lies inside the boxes. */
+function shapeUnder(shape: Shape, op: string, areas: Box[]): boolean {
+  const paint = PAINT[op];
+  closeForPainting(shape, op);
+  const isArea = paint.fill !== null || shape.clip !== null || !paint.stroke;
+  return shape.subs.some((s) => {
+    if (s.segs.length === 0) {
+      const [x, y] = apply(shape.ctm, s.start[0], s.start[1]);
+      return areas.some((a) => x > a.x0 && x < a.x1 && y > a.y0 && y < a.y1);
+    }
+    return edges(s, isArea || s.closed).some((e) => segInside(e.from, e.seg, shape.ctm, areas));
+  });
+}
+
+// ---------------------------------------------------------------------------
+// The page
+// ---------------------------------------------------------------------------
+
+/** What redacting one copy did so far: for the check after each page, and the clean-up at the end. */
+export class RedactionRun {
+  /** Painted copies of pictures (by reference), and the transform each one is drawn with. */
+  readonly painted = new Map<string, M>();
+  /** Pictures and drawings redacted pages no longer draw (replaced by cleaned copies, or by a picture of the page). */
+  readonly originals = new Map<string, PDFRef>();
+}
+
+/**
+ * Removes what lies under `areas` from `page` (see the top of this file), then reads the result back
+ * and checks it. Returns ok: false if the page should be saved as a picture instead.
+ */
+export async function redactPage(doc: PDFDocument, page: PDFPage, areas: Area[], run: RedactionRun = new RedactionRun()): Promise<RedactResult> {
   if (areas.length === 0) return { ok: true };
   const ctx = doc.context;
   page.node.normalize();
+  dropPageCopies(page);
   try {
-    const contents = page.node.Contents();
-    const streams = contents instanceof PDFArray ? contents.asArray().map((x) => ctx.lookup(x)) : [contents];
-    const parts: Uint8Array[] = [];
-    for (const s of streams) if (s instanceof PDFStream) parts.push(streamBytes(s), Uint8Array.of(10));
-    const content = concat(parts);
+    const content = pageContent(page);
     // This page's own copy of its resource lists (they may be shared with other pages).
     const resources = privateResources(doc, page.node.Resources());
     page.node.set(PDFName.of("Resources"), resources);
     const counter = { n: 0 };
-    const result = await redactContent(doc, content, resources, initialState(), areas, counter, 0);
+    const { result } = await redactContent(doc, content, resources, initialState(), areas, counter, run, 0);
     // Even unchanged content is rewritten as one stream, so the page's drawing instructions are a fresh copy.
     const ref = ctx.register(ctx.flateStream(result));
     page.node.set(PDFName.of("Contents"), ctx.obj([ref]));
     removeAnnotations(doc, page, areas);
     forgetContentStream(page);
+    const found = checkPage(doc, page, areas, run);
+    if (found) return { ok: false, reason: `the check afterwards found ${found} under a box` };
     return { ok: true };
   } catch (error) {
     if (error instanceof Unsupported) return { ok: false, reason: error.message };
     throw error;
   }
+}
+
+/** All of a page's drawing instructions, decoded, as one. */
+function pageContent(page: PDFPage): Uint8Array {
+  const ctx = page.doc.context;
+  const contents = page.node.Contents();
+  const streams = contents instanceof PDFArray ? contents.asArray().map((x) => ctx.lookup(x)) : [contents];
+  const parts: Uint8Array[] = [];
+  for (const s of streams) if (s instanceof PDFStream) parts.push(streamBytes(s), Uint8Array.of(10));
+  return concat(parts);
 }
 
 function concat(parts: Uint8Array[]): Uint8Array {
@@ -724,10 +1340,6 @@ function freshName(resources: PDFDict, category: string, counter: { n: number },
   do name = `PlainPdfRedacted${++counter.n}`;
   while ((sub as PDFDict).has(PDFName.of(name)));
   return name;
-}
-
-function initialState(): GState {
-  return { ctm: IDENTITY, font: null, size: 0, charSpace: 0, wordSpace: 0, scale: 1, leading: 0, rise: 0, render: 0 };
 }
 
 /**
@@ -770,6 +1382,8 @@ function usedXObjects(content: Uint8Array): Set<string> {
   return used;
 }
 
+const HIDDEN_TEXT = ["ActualText", "Alt", "E"];
+
 async function redactContent(
   doc: PDFDocument,
   content: Uint8Array,
@@ -777,37 +1391,21 @@ async function redactContent(
   startState: GState,
   areas: Area[],
   counter: { n: number },
+  run: RedactionRun,
   depth: number,
-): Promise<Uint8Array> {
+): Promise<{ result: Uint8Array; changed: boolean }> {
   if (depth > 12) throw new Unsupported("drawings nested too deeply");
   const ctx = doc.context;
   const ops = parseContent(content);
+  // Set when hidden words are taken out of the (private) marked-content list, which the bytes don't show.
+  let listChanged = false;
   const replacements: { start: number; end: number; text: string }[] = [];
-  const fonts = new Map<string, FontInfo>();
-  const fontsDict = resources.lookup(PDFName.of("Font"));
-  const fontNamed = (name: string): FontInfo => {
-    if (!fonts.has(name)) {
-      const fd = fontsDict instanceof PDFDict ? fontsDict.lookup(PDFName.of(name)) : undefined;
-      if (!(fd instanceof PDFDict)) throw new Unsupported(`missing font ${name}`);
-      fonts.set(name, readFont(doc, fd));
-    }
-    return fonts.get(name)!;
-  };
   // A drawing inside the page starts from the page's state at that point (including text settings).
-  let gs: GState = { ...startState };
+  const t = new Tracker(startState, fontLookup(doc, resources));
   const replacedNames = new Set<string>();
-  const stack: GState[] = [];
-  let tm: M = IDENTITY;
-  let tlm: M = IDENTITY;
-  let path: { start: number; points: [number, number][]; clip: boolean } | null = null;
-  const areaBoxes: Box[] = areas;
 
   /** Shows text; returns the replacement TJ text if any letter was under a box. */
   const show = (items: Value[]): string | null => {
-    const font = gs.font;
-    if (!font) throw new Unsupported("text without a font");
-    const th = gs.scale;
-    const fs = gs.size;
     let any = false;
     const out: (Uint8Array | number)[] = [];
     let kept: number[] = [];
@@ -815,42 +1413,25 @@ async function redactContent(
       if (kept.length) out.push(Uint8Array.from(kept));
       kept = [];
     };
-    for (const item of items) {
-      if (typeof item === "number") {
-        flush();
-        out.push(item);
-        tm = mul([1, 0, 0, 1, (-item / 1000) * fs * th, 0], tm);
-        continue;
-      }
-      if (!isStr(item)) continue;
-      const bytes = item.str;
-      const step = font.twoByte ? 2 : 1;
-      for (let k = 0; k + step <= bytes.length; k += step) {
-        const code = step === 2 ? (bytes[k] << 8) | bytes[k + 1] : bytes[k];
-        const w0 = font.width(code);
-        const trm = mul([fs * th, 0, 0, fs, 0, gs.rise], mul(tm, gs.ctm));
-        const gw = Math.max(w0, 0.1);
-        const glyph = bounds([apply(trm, 0, font.descent), apply(trm, gw, font.descent), apply(trm, 0, font.ascent), apply(trm, gw, font.ascent)]);
-        const invisible = gs.render === 3 || gs.render === 7;
-        const hit = areaBoxes.some((a) => {
-          const o = overlap(glyph, a);
-          if (invisible) return o.w > 0.2 && o.h > 0.2;
-          return o.w >= 0.25 * (glyph.x1 - glyph.x0) && o.h >= 0.25 * (glyph.y1 - glyph.y0) && o.w > 0.1 && o.h > 0.1;
-        });
-        const space = step === 1 && code === 32 ? gs.wordSpace : 0;
-        const advance = (w0 * fs + gs.charSpace + space) * th;
-        if (hit) {
-          any = true;
-          if (Math.abs(fs * th) < 1e-9) throw new Unsupported("zero-size text");
-          flush();
-          out.push(-(advance * 1000) / (fs * th));
-        } else {
-          for (let j = 0; j < step; j++) kept.push(bytes[k + j]);
+    t.show(
+      items,
+      (g) => {
+        if (!glyphHit(g, areas)) {
+          kept.push(...g.bytes);
+          return;
         }
-        tm = mul([1, 0, 0, 1, advance, 0], tm);
-      }
-      flush();
-    }
+        any = true;
+        const fsth = t.gs.size * t.gs.scale;
+        if (Math.abs(fsth) < 1e-9) throw new Unsupported("zero-size text");
+        flush();
+        out.push(-(g.advance * 1000) / fsth);
+      },
+      (n) => {
+        flush();
+        out.push(n);
+      },
+    );
+    flush();
     if (!any) return null;
     // Join neighbouring numbers.
     const merged: (Uint8Array | number)[] = [];
@@ -867,104 +1448,18 @@ async function redactContent(
 
   for (const o of ops) {
     const a = o.args;
+    t.update(o);
     switch (o.op) {
-      case "q":
-        stack.push({ ...gs });
-        break;
-      case "Q":
-        if (stack.length) gs = stack.pop()!;
-        break;
-      case "cm":
-        if (a.length >= 6) gs.ctm = mul(a.slice(0, 6).map(num) as M, gs.ctm);
-        break;
-      case "BT":
-        tm = tlm = IDENTITY;
-        break;
-      case "Tc":
-        gs.charSpace = num(a[0]);
-        break;
-      case "Tw":
-        gs.wordSpace = num(a[0]);
-        break;
-      case "Tz":
-        gs.scale = num(a[0]) / 100;
-        break;
-      case "TL":
-        gs.leading = num(a[0]);
-        break;
-      case "Ts":
-        gs.rise = num(a[0]);
-        break;
-      case "Tr":
-        gs.render = num(a[0]);
-        break;
-      case "Tf":
-        if (isName(a[0])) gs.font = fontNamed(a[0].name);
-        gs.size = num(a[1]);
-        break;
-      case "Td":
-        tlm = mul([1, 0, 0, 1, num(a[0]), num(a[1])], tlm);
-        tm = tlm;
-        break;
-      case "TD":
-        gs.leading = -num(a[1]);
-        tlm = mul([1, 0, 0, 1, num(a[0]), num(a[1])], tlm);
-        tm = tlm;
-        break;
-      case "Tm":
-        tlm = tm = a.slice(0, 6).map(num) as M;
-        break;
-      case "T*":
-        tlm = mul([1, 0, 0, 1, 0, -gs.leading], tlm);
-        tm = tlm;
-        break;
       case "Tj":
       case "TJ":
       case "'":
       case '"': {
-        let prefix = "";
-        let items: Value[];
-        if (o.op === "'" || o.op === '"') {
-          if (o.op === '"') {
-            gs.wordSpace = num(a[0]);
-            gs.charSpace = num(a[1]);
-            prefix = `${fmt(gs.wordSpace)} Tw ${fmt(gs.charSpace)} Tc `;
-          }
-          tlm = mul([1, 0, 0, 1, 0, -gs.leading], tlm);
-          tm = tlm;
-          prefix += "T* ";
-          items = [a[a.length - 1]];
-        } else if (o.op === "TJ") {
-          items = Array.isArray(a[0]) ? a[0] : [];
-        } else {
-          items = [a[0]];
-        }
-        const replaced = show(items);
+        // The ' and " operators also move to the next line (and " sets the spacing): written out separately.
+        const prefix = o.op === '"' ? `${fmt(t.gs.wordSpace)} Tw ${fmt(t.gs.charSpace)} Tc T* ` : o.op === "'" ? "T* " : "";
+        const replaced = show(textItems(o));
         if (replaced) replacements.push({ start: o.start, end: o.end, text: ` ${prefix}${replaced} ` });
         break;
       }
-      case "m":
-      case "l":
-      case "c":
-      case "v":
-      case "y":
-      case "re": {
-        if (!path) path = { start: o.start, points: [], clip: false };
-        const nums = a.map(num);
-        if (o.op === "re") {
-          const [x, y, w, h] = nums;
-          for (const [px, py] of [[x, y], [x + w, y], [x, y + h], [x + w, y + h]]) path.points.push(apply(gs.ctm, px, py));
-        } else {
-          for (let k = 0; k + 1 < nums.length; k += 2) path.points.push(apply(gs.ctm, nums[k], nums[k + 1]));
-        }
-        break;
-      }
-      case "h":
-        break;
-      case "W":
-      case "W*":
-        if (path) path.clip = true;
-        break;
       case "S":
       case "s":
       case "f":
@@ -975,11 +1470,11 @@ async function redactContent(
       case "b":
       case "b*":
       case "n": {
-        if (path && o.op !== "n" && !path.clip && path.points.length > 0) {
-          const box = bounds(path.points);
-          if (areaBoxes.some((area) => inside(box, area))) replacements.push({ start: path.start, end: o.end, text: " " });
-        }
-        path = null;
+        const shape = t.shape;
+        t.shape = null;
+        if (!shape) break;
+        const text = cutShape(shape, o.op, areas, t.gs);
+        if (text !== null) replacements.push({ start: shape.start, end: o.end, text });
         break;
       }
       case "Do": {
@@ -987,6 +1482,7 @@ async function redactContent(
         const ref = xobjects.get(PDFName.of(a[0].name));
         const x = ctx.lookup(ref);
         if (!(x instanceof PDFStream)) break;
+        const gs = t.gs;
         const sub = (x.dict.lookup(PDFName.of("Subtype")) as PDFName | undefined)?.decodeText?.();
         if (sub === "Image") {
           const box = bounds([apply(gs.ctm, 0, 0), apply(gs.ctm, 1, 0), apply(gs.ctm, 0, 1), apply(gs.ctm, 1, 1)]);
@@ -994,37 +1490,34 @@ async function redactContent(
           if (hits.length === 0) break;
           const copy = await paintImage(doc, x, gs.ctm, hits);
           if (!copy) break;
+          run.painted.set(copy.toString(), gs.ctm);
           const name = freshName(resources, "XObject", counter, ctx);
           (resources.lookup(PDFName.of("XObject")) as PDFDict).set(PDFName.of(name), copy);
           replacedNames.add(a[0].name);
+          if (ref instanceof PDFRef) run.originals.set(ref.toString(), ref);
           replacements.push({ start: o.start, end: o.end, text: ` ${writeName(name)} Do ` });
         } else if (sub === "Form") {
-          const fm = x.dict.lookup(PDFName.of("Matrix"));
-          const matrix = fm instanceof PDFArray ? (fm.asArray().map((v) => (ctx.lookup(v) as PDFNumber)?.asNumber?.() ?? 0) as M) : IDENTITY;
-          const ctm = mul(matrix, gs.ctm);
-          const bb = x.dict.lookup(PDFName.of("BBox"));
-          if (bb instanceof PDFArray) {
-            const [x0, y0, x1, y1] = bb.asArray().map((v) => (ctx.lookup(v) as PDFNumber)?.asNumber?.() ?? 0);
-            const box = bounds([apply(ctm, x0, y0), apply(ctm, x1, y0), apply(ctm, x0, y1), apply(ctm, x1, y1)]);
-            if (!areas.some((area) => touches(box, area))) break;
-          }
+          const ctm = formMatrix(doc, x, gs.ctm);
+          if (!formTouches(doc, x, ctm, areas)) break;
           const formRes = x.dict.lookup(PDFName.of("Resources"));
           const inner = privateResources(doc, formRes instanceof PDFDict ? formRes : resources);
           const before = streamBytes(x);
-          const after = await redactContent(doc, before, inner, { ...gs, ctm }, areas, counter, depth + 1);
-          if (sameBytes(before, after)) break;
+          const { result: after, changed } = await redactContent(doc, before, inner, { ...gs, ctm }, areas, counter, run, depth + 1);
+          if (!changed) break;
           const copy = ctx.flateStream(after);
           for (const [k, v] of x.dict.entries()) if (!["Length", "Filter", "DecodeParms", "Resources"].includes(k.decodeText())) copy.dict.set(k, v);
           copy.dict.set(PDFName.of("Resources"), inner);
           const name = freshName(resources, "XObject", counter, ctx);
           (resources.lookup(PDFName.of("XObject")) as PDFDict).set(PDFName.of(name), ctx.register(copy));
           replacedNames.add(a[0].name);
+          if (ref instanceof PDFRef) run.originals.set(ref.toString(), ref);
           replacements.push({ start: o.start, end: o.end, text: ` ${writeName(name)} Do ` });
         }
         break;
       }
       case "BI": {
-        const box = bounds([apply(gs.ctm, 0, 0), apply(gs.ctm, 1, 0), apply(gs.ctm, 0, 1), apply(gs.ctm, 1, 1)]);
+        const ctm = t.gs.ctm;
+        const box = bounds([apply(ctm, 0, 0), apply(ctm, 1, 0), apply(ctm, 0, 1), apply(ctm, 1, 1)]);
         if (areas.some((area) => touches(box, area))) throw new Unsupported("inline picture under a box");
         break;
       }
@@ -1032,12 +1525,15 @@ async function redactContent(
       case "DP": {
         // Hidden copies of the words ("ActualText", "Alt", "E") would survive removal: drop them on this page.
         const props = a[1];
-        if (props instanceof Map && (props.has("ActualText") || props.has("Alt") || props.has("E"))) {
-          const clean = new Map([...props].filter(([k]) => k !== "ActualText" && k !== "Alt" && k !== "E"));
+        if (props instanceof Map && HIDDEN_TEXT.some((k) => props.has(k))) {
+          const clean = new Map([...props].filter(([k]) => !HIDDEN_TEXT.includes(k)));
           replacements.push({ start: o.start, end: o.end, text: ` ${writeValue(a[0])} ${writeValue(clean)} ${o.op} ` });
         } else if (isName(props) && properties instanceof PDFDict) {
           const p = properties.lookup(PDFName.of(props.name));
-          if (p instanceof PDFDict) for (const k of ["ActualText", "Alt", "E"]) p.delete(PDFName.of(k));
+          if (p instanceof PDFDict && HIDDEN_TEXT.some((k) => p.has(PDFName.of(k)))) {
+            for (const k of HIDDEN_TEXT) p.delete(PDFName.of(k));
+            listChanged = true;
+          }
         }
         break;
       }
@@ -1046,7 +1542,7 @@ async function redactContent(
     }
   }
 
-  if (replacements.length === 0) return content;
+  if (replacements.length === 0) return { result: content, changed: listChanged };
   replacements.sort((x, y) => x.start - y.start);
   const enc = new TextEncoder();
   const parts: Uint8Array[] = [];
@@ -1065,14 +1561,131 @@ async function redactContent(
     const list = resources.lookup(PDFName.of("XObject"));
     if (list instanceof PDFDict) for (const name of replacedNames) if (!used.has(name)) list.delete(PDFName.of(name));
   }
-  return result;
+  return { result, changed: true };
 }
 
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-  if (a === b) return true;
-  if (a.length !== b.length) return false;
-  for (let k = 0; k < a.length; k++) if (a[k] !== b[k]) return false;
-  return true;
+/** The transform a drawing (form) is drawn with. */
+function formMatrix(doc: PDFDocument, form: PDFStream, ctm: M): M {
+  const fm = form.dict.lookup(PDFName.of("Matrix"));
+  const matrix = fm instanceof PDFArray ? (fm.asArray().map((v) => (doc.context.lookup(v) as PDFNumber)?.asNumber?.() ?? 0) as M) : IDENTITY;
+  return mul(matrix, ctm);
+}
+
+/** Whether a drawing's frame (BBox; it shows nothing outside it) touches any of the areas. */
+function formTouches(doc: PDFDocument, form: PDFStream, ctm: M, areas: Box[]): boolean {
+  const bb = form.dict.lookup(PDFName.of("BBox"));
+  if (!(bb instanceof PDFArray)) return true;
+  const [x0, y0, x1, y1] = bb.asArray().map((v) => (doc.context.lookup(v) as PDFNumber)?.asNumber?.() ?? 0);
+  const box = bounds([apply(ctm, x0, y0), apply(ctm, x1, y0), apply(ctm, x0, y1), apply(ctm, x1, y1)]);
+  return areas.some((area) => touches(box, area));
+}
+
+// ---------------------------------------------------------------------------
+// The check afterwards
+// ---------------------------------------------------------------------------
+
+/**
+ * Reads a redacted page back (its drawing instructions decoded again from the stored stream) and follows
+ * them on its own, looking for anything still under a box: letters, pictures not painted over there,
+ * shapes, inline pictures, hidden copies of words, links and notes, stored copies of the page. Returns
+ * what it found, or null. A page that fails is saved as a picture instead.
+ */
+function checkPage(doc: PDFDocument, page: PDFPage, areas: Area[], run: RedactionRun): string | null {
+  const ctx = doc.context;
+  const resources = page.node.Resources() ?? (ctx.obj({}) as PDFDict);
+  const found = leftoverIn(doc, pageContent(page), resources, initialState(), areas, run, 0);
+  if (found) return found;
+  for (const item of page.node.Annots()?.asArray() ?? []) {
+    const rect = (ctx.lookup(item) as PDFDict | undefined)?.lookup?.(PDFName.of("Rect"));
+    const r = rect instanceof PDFArray ? rect.asArray().map((v) => (ctx.lookup(v) as PDFNumber)?.asNumber?.() ?? 0) : null;
+    if (r && areas.some((a) => touches({ x0: Math.min(r[0], r[2]), y0: Math.min(r[1], r[3]), x1: Math.max(r[0], r[2]), y1: Math.max(r[1], r[3]) }, a))) return "a link or note";
+  }
+  if (page.node.has(PDFName.of("Thumb")) || page.node.has(PDFName.of("PieceInfo"))) return "a stored copy of the page";
+  return null;
+}
+
+function leftoverIn(doc: PDFDocument, content: Uint8Array, resources: PDFDict, start: GState, areas: Area[], run: RedactionRun, depth: number): string | null {
+  if (depth > 12) return "drawings nested too deeply";
+  const ctx = doc.context;
+  const t = new Tracker(start, fontLookup(doc, resources));
+  const near = areas.map((a) => shrink(a, 2 * EPS));
+  const xobjects = resources.lookup(PDFName.of("XObject"));
+  const properties = resources.lookup(PDFName.of("Properties"));
+  for (const o of parseContent(content)) {
+    const a = o.args;
+    t.update(o);
+    switch (o.op) {
+      case "Tj":
+      case "TJ":
+      case "'":
+      case '"': {
+        let hit = false;
+        t.show(textItems(o), (g) => (hit ||= glyphHit(g, areas)));
+        if (hit) return "words";
+        break;
+      }
+      case "S":
+      case "s":
+      case "f":
+      case "F":
+      case "f*":
+      case "B":
+      case "B*":
+      case "b":
+      case "b*":
+      case "n": {
+        const shape = t.shape;
+        t.shape = null;
+        if (shape && shapeUnder(shape, o.op, near)) return "part of a shape";
+        break;
+      }
+      case "Do": {
+        if (!isName(a[0]) || !(xobjects instanceof PDFDict)) break;
+        const ref = xobjects.get(PDFName.of(a[0].name));
+        const x = ctx.lookup(ref);
+        if (!(x instanceof PDFStream)) break;
+        const ctm = t.gs.ctm;
+        const sub = (x.dict.lookup(PDFName.of("Subtype")) as PDFName | undefined)?.decodeText?.();
+        if (sub === "Image") {
+          const box = bounds([apply(ctm, 0, 0), apply(ctm, 1, 0), apply(ctm, 0, 1), apply(ctm, 1, 1)]);
+          const hits = areas.filter((area) => touches(box, area));
+          if (hits.length === 0) break;
+          // Fine if it's a copy painted for exactly this place, or if no pixel of it is under a box.
+          const painted = ref instanceof PDFRef ? run.painted.get(ref.toString()) : undefined;
+          if (painted && painted.every((v, k) => Math.abs(v - ctm[k]) <= 1e-6 * (1 + Math.abs(v)))) break;
+          const width = (x.dict.lookup(PDFName.of("Width")) as PDFNumber | undefined)?.asNumber?.() ?? 0;
+          const height = (x.dict.lookup(PDFName.of("Height")) as PDFNumber | undefined)?.asNumber?.() ?? 0;
+          if (pixelBoxes(ctm, width, height, hits).length > 0) return "a picture";
+        } else if (sub === "Form") {
+          const fctm = formMatrix(doc, x, ctm);
+          if (!formTouches(doc, x, fctm, areas)) break;
+          const formRes = x.dict.lookup(PDFName.of("Resources"));
+          const found = leftoverIn(doc, streamBytes(x), formRes instanceof PDFDict ? formRes : resources, { ...t.gs, ctm: fctm }, areas, run, depth + 1);
+          if (found) return found;
+        }
+        break;
+      }
+      case "BI": {
+        const ctm = t.gs.ctm;
+        const box = bounds([apply(ctm, 0, 0), apply(ctm, 1, 0), apply(ctm, 0, 1), apply(ctm, 1, 1)]);
+        if (areas.some((area) => touches(box, area))) return "an inline picture";
+        break;
+      }
+      case "BDC":
+      case "DP": {
+        const props = a[1];
+        if (props instanceof Map && HIDDEN_TEXT.some((k) => props.has(k))) return "hidden words";
+        if (isName(props) && properties instanceof PDFDict) {
+          const p = properties.lookup(PDFName.of(props.name));
+          if (p instanceof PDFDict && HIDDEN_TEXT.some((k) => p.has(PDFName.of(k)))) return "hidden words";
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  return null;
 }
 
 /** Removes links, notes and form fields that overlap the areas. */
@@ -1133,19 +1746,41 @@ export function forgetContentStream(page: PDFPage): void {
 }
 
 /**
+ * Stored copies of what a page showed, which redaction would leave behind: a small picture of the
+ * page (Thumb) and apps' private data (PieceInfo; Illustrator, for one, keeps its own copy of the
+ * artwork there).
+ */
+function dropPageCopies(page: PDFPage): void {
+  page.node.delete(PDFName.of("Thumb"));
+  page.node.delete(PDFName.of("PieceInfo"));
+}
+
+/**
  * Replaces everything on a page with a picture of it (for pages whose content
  * can't be changed safely). `toPdf` maps the page as shown (width × height
- * points, top-left origin) to its PDF coordinates. Links, notes and form
- * fields on the page are removed (the picture shows them as they looked).
+ * points, top-left origin) to its PDF coordinates. The page gets new resource
+ * lists holding only the picture, so its original pictures, drawings and fonts
+ * are no longer part of it (and are cleared out of the file). Links, notes and
+ * form fields on the page are removed (the picture shows them as they looked).
  */
-export async function replaceWithPicture(doc: PDFDocument, page: PDFPage, toPdf: M, picture: { jpeg: Uint8Array; width: number; height: number }): Promise<void> {
+export async function replaceWithPicture(
+  doc: PDFDocument,
+  page: PDFPage,
+  toPdf: M,
+  picture: { jpeg: Uint8Array; width: number; height: number },
+  run: RedactionRun = new RedactionRun(),
+): Promise<void> {
   const ctx = doc.context;
   page.node.normalize();
+  const old = page.node.Resources()?.lookup(PDFName.of("XObject"));
+  if (old instanceof PDFDict) for (const [, v] of old.entries()) if (v instanceof PDFRef) run.originals.set(v.toString(), v);
   const image = await doc.embedJpg(picture.jpeg);
-  const name = page.node.newXObject("PlainPdfPagePicture", image.ref);
+  // Empty font and graphics-state lists too: edits and highlights drawn afterwards add theirs there.
+  page.node.set(PDFName.of("Resources"), ctx.obj({ Font: {}, XObject: { PlainPdfPagePicture: image.ref }, ExtGState: {} }));
   const m = mul([picture.width, 0, 0, -picture.height, 0, picture.height], toPdf);
-  const content = `q ${m.map(fmt).join(" ")} cm ${writeName(name.decodeText())} Do Q`;
+  const content = `q ${m.map(fmt).join(" ")} cm /PlainPdfPagePicture Do Q`;
   page.node.set(PDFName.of("Contents"), ctx.obj([ctx.register(ctx.flateStream(content))]));
+  dropPageCopies(page);
   const annots = page.node.Annots();
   if (annots) {
     const all = annots.asArray().map((a) => ctx.lookup(a)).filter((a): a is PDFDict => a instanceof PDFDict);
@@ -1161,6 +1796,9 @@ export async function replaceWithPicture(doc: PDFDocument, page: PDFPage, toPdf:
   forgetContentStream(page);
 }
 
+// ---------------------------------------------------------------------------
+// Clearing out the file
+// ---------------------------------------------------------------------------
 
 /**
  * Deletes every object nothing refers to any more. pdf-lib writes all objects
@@ -1193,4 +1831,109 @@ export function removeUnreachable(doc: PDFDocument): void {
   for (const [ref] of ctx.enumerateIndirectObjects()) {
     if (!seen.has(ref.toString())) ctx.delete(ref);
   }
+}
+
+/**
+ * The last step of a save with redaction: deletes everything nothing refers to any more. Then, if some
+ * of the pictures and drawings redacted pages stopped drawing are still in the file, because they're
+ * listed in resources shared with other pages (or inherited from the page tree), and no page draws them,
+ * they're taken off those lists and deleted too.
+ */
+export function finishRedaction(doc: PDFDocument, run: RedactionRun): void {
+  removeUnreachable(doc);
+  const ctx = doc.context;
+  const left = [...run.originals.values()].filter((ref) => ctx.lookup(ref) !== undefined);
+  if (left.length === 0) return;
+  const drawn = drawnXObjects(doc);
+  if (!drawn) {
+    console.info("Couldn't read every page's drawing instructions, so pictures listed but not drawn were kept.");
+    return;
+  }
+  const unused = new Set(left.map(String).filter((key) => !drawn.has(key)));
+  if (unused.size === 0) return;
+  const done = new Set<PDFObject>();
+  const clean = (o: PDFObject | undefined): void => {
+    if (!o || o instanceof PDFRef || done.has(o)) return;
+    done.add(o);
+    if (o instanceof PDFStream) clean(o.dict);
+    else if (o instanceof PDFArray) for (const v of o.asArray()) clean(v);
+    else if (o instanceof PDFDict) {
+      const list = o.lookup(PDFName.of("XObject"));
+      if (list instanceof PDFDict) for (const [k, v] of [...list.entries()]) if (v instanceof PDFRef && unused.has(v.toString())) list.delete(k);
+      for (const [, v] of o.entries()) clean(v);
+    }
+  };
+  for (const [, obj] of ctx.enumerateIndirectObjects()) clean(obj);
+  removeUnreachable(doc);
+}
+
+/**
+ * Every picture and drawing (by reference) that something in the file still draws: the pages, the
+ * drawings inside them, patterns, soft masks, Type 3 letters and the looks of links, notes and form
+ * fields. Null if some drawing instructions couldn't be read (so nothing can be ruled out).
+ */
+function drawnXObjects(doc: PDFDocument): Set<string> | null {
+  const ctx = doc.context;
+  const drawn = new Set<string>();
+  const done = new Set<string>();
+  const ids = new Map<PDFDict, number>();
+  const idOf = (d: PDFDict | undefined) => {
+    if (!d) return 0;
+    if (!ids.has(d)) ids.set(d, ids.size + 1);
+    return ids.get(d)!;
+  };
+  const entry = (res: PDFDict | undefined, category: string, name: string): PDFObject | undefined => {
+    const list = res?.lookup(PDFName.of(category));
+    return list instanceof PDFDict ? list.get(PDFName.of(name)) : undefined;
+  };
+  const visit = (obj: PDFObject | undefined, res: PDFDict | undefined, depth: number): void => {
+    if (obj instanceof PDFRef) drawn.add(obj.toString());
+    const x = obj instanceof PDFRef ? ctx.lookup(obj) : obj;
+    if (!(x instanceof PDFStream)) return;
+    if ((x.dict.lookup(PDFName.of("Subtype")) as PDFName | undefined)?.decodeText?.() === "Image") return;
+    const own = x.dict.lookup(PDFName.of("Resources"));
+    const key = `${obj instanceof PDFRef ? obj.toString() : `direct${idOf(x.dict)}`}@${own instanceof PDFDict ? 0 : idOf(res)}`;
+    if (done.has(key)) return;
+    done.add(key);
+    walk(streamBytes(x), own instanceof PDFDict ? own : res, depth + 1);
+  };
+  const walk = (content: Uint8Array, res: PDFDict | undefined, depth: number): void => {
+    if (depth > 30) throw new Unsupported("drawings nested too deeply");
+    for (const o of parseContent(content)) {
+      const first = o.args[0];
+      const last = o.args[o.args.length - 1];
+      if (o.op === "Do" && isName(first)) visit(entry(res, "XObject", first.name), res, depth);
+      else if ((o.op === "scn" || o.op === "SCN") && isName(last)) visit(entry(res, "Pattern", last.name), res, depth);
+      else if (o.op === "gs" && isName(first)) {
+        const g = ctx.lookup(entry(res, "ExtGState", first.name));
+        const mask = g instanceof PDFDict ? g.lookup(PDFName.of("SMask")) : undefined;
+        if (mask instanceof PDFDict) visit(mask.get(PDFName.of("G")), res, depth);
+      } else if (o.op === "Tf" && isName(first)) {
+        const font = ctx.lookup(entry(res, "Font", first.name));
+        const procs = font instanceof PDFDict ? font.lookup(PDFName.of("CharProcs")) : undefined;
+        if (font instanceof PDFDict && procs instanceof PDFDict) {
+          const fontRes = font.lookup(PDFName.of("Resources"));
+          for (const [, v] of procs.entries()) visit(v, fontRes instanceof PDFDict ? fontRes : res, depth);
+        }
+      }
+    }
+  };
+  try {
+    for (const page of doc.getPages()) {
+      walk(pageContent(page), page.node.Resources(), 0);
+      for (const item of page.node.Annots()?.asArray() ?? []) {
+        const ap = (ctx.lookup(item) as PDFDict | undefined)?.lookup?.(PDFName.of("AP"));
+        if (!(ap instanceof PDFDict)) continue;
+        for (const [, look] of ap.entries()) {
+          const v = ctx.lookup(look);
+          if (v instanceof PDFDict && !(v instanceof PDFStream)) for (const [, state] of v.entries()) visit(state, undefined, 0);
+          else visit(look, undefined, 0);
+        }
+      }
+    }
+  } catch (error) {
+    console.info("Couldn't follow every drawing:", error);
+    return null;
+  }
+  return drawn;
 }

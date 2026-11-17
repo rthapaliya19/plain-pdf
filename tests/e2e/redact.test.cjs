@@ -4,6 +4,10 @@
 // text with letter/word spacing (the ' operator), a photo (JPEG) with invisible "OCR" text over it,
 // a logo with transparency (PNG), a blue rectangle and a long line, text inside a form drawing,
 // a hidden ActualText copy of a span, and a web link; on page 2 an inline picture.
+// tests/fixtures/redact-leaks.pdf has what earlier versions left in saved copies (a fax-compressed scan and a
+// drawing's words on a page saved as a picture, shapes partly under boxes, page thumbnails and app-private data,
+// pictures listed in resources shared between pages); those checks search every object in the saved file,
+// with streams decoded, not just what the pages still show.
 // Run `npm run preview` first, then: node tests/e2e/redact.test.cjs [screenshot-folder]
 const { chromium, devices } = require("playwright");
 const { execFileSync } = require("node:child_process");
@@ -275,6 +279,197 @@ print(json.dumps({"n": len(r.pages[0].images), "size": im.size, "inside": im.get
   check("...and the next page is untouched", ow[1].some((x) => x.text === "3") && ow[1].some((x) => x.text === "25"));
   check("organize: no errors or warnings", op.length === 0, op.join(" | "));
   await octx.close();
+
+  // ----- Things earlier versions left in the saved file (tests/fixtures/redact-leaks.pdf, see make-redact-test.cjs) -----
+  const lctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1 });
+  const L = await lctx.newPage();
+  const lp = await watch(L, "leaks");
+  await L.goto(APP);
+  await L.setInputFiles("input[type=file]", pdf("redact-leaks.pdf"));
+  await L.waitForSelector('.page[data-page="1"] .page-canvas');
+  for (let k = 0; k < 3; k++) await L.click('button[title^="Zoom out"]');
+  await L.waitForTimeout(400);
+  /** A box on page n over x0..x1, y0..y1 in the page's PDF coordinates (points from the bottom-left). */
+  const redactAt = async (n, x0, y0, x1, y1) => {
+    await L.fill(".page-input", String(n));
+    await L.press(".page-input", "Enter");
+    await L.waitForTimeout(400);
+    const p = await box(L, `.page[data-page="${n}"]`);
+    const k = p.w / 612;
+    await L.click('button[aria-label="More"]');
+    await L.click(".menu-item >> text=Redact");
+    await drag(L, [p.x + x0 * k, p.y + (792 - y1) * k], [p.x + x1 * k, p.y + (792 - y0) * k]);
+    await L.click(".redact-options .done-button");
+  };
+  const BOXES = {
+    1: [[60, 642, 400, 697], [66, 452, 210, 478]], // the scan's words; the drawing's first line
+    2: [[250, 600, 350, 680], [250, 470, 350, 530], [250, 400, 350, 460], [280, 290, 320, 350]],
+    3: [[230, 170, 280, 230]],
+    4: [[128, 508, 272, 556]],
+  };
+  for (const [n, list] of Object.entries(BOXES)) for (const b of list) await redactAt(+n, ...b);
+  check("leaks: eight boxes", (await count(L, 'rect[data-kind="redact"]')) === 8);
+  await L.click("button.save-button");
+  await L.waitForFunction(() => window.__saves.length === 1 && window.__saves[0].bytes, null, { timeout: 60000 });
+  const lfile = join(SHOTS, "redacted-leaks.pdf");
+  writeFileSync(lfile, Buffer.from(await L.evaluate(() => window.__saves[0].bytes)));
+  const ltoast = await L.textContent(".toast");
+  check("leaks: pages 1 (fax scan) and 3 (curve across a box) saved as pictures, 2 and 4 not", ltoast.includes("Pages 1, 3 were saved as a picture"), ltoast);
+
+  // Every object in the file, streams decoded, plus every stream found directly in the file's bytes.
+  const scanAll = JSON.parse(py(`
+import re, zlib, logging
+logging.disable(logging.CRITICAL)
+from pypdf.generic import DictionaryObject, ArrayObject, IndirectObject
+raw = open(sys.argv[1], "rb").read()
+orig = PdfReader(${JSON.stringify(pdf("redact-leaks.pdf"))})
+strip = orig.pages[0]["/Resources"]["/XObject"]["/Scan"].get_object()._data
+blobs, keys, filters = [raw], set(), set()
+def walk(o):
+    if isinstance(o, DictionaryObject):
+        for k, v in o.items():
+            keys.add(str(k))
+            if not isinstance(v, IndirectObject): walk(v)
+    elif isinstance(o, ArrayObject):
+        for v in o:
+            if not isinstance(v, IndirectObject): walk(v)
+for num in range(1, int(r.trailer["/Size"])):
+    try:
+        obj = r.get_object(num)
+    except Exception:
+        continue
+    if obj is None:
+        continue
+    walk(obj)
+    if hasattr(obj, "get_data"):
+        f = obj.get("/Filter")
+        for x in (f if isinstance(f, list) else [f] if f else []): filters.add(str(x))
+        blobs.append(obj._data)
+        try:
+            blobs.append(obj.get_data())
+        except Exception:
+            pass
+    else:
+        blobs.append(repr(obj).encode("latin1", "replace"))
+for m in re.finditer(rb"stream\\r?\\n(.*?)endstream", raw, re.S):
+    try:
+        blobs.append(zlib.decompress(m.group(1)))
+    except Exception:
+        pass
+secrets = ["FORMSECRET", "FORMOUTSIDE", "THUMBSECRET", "PIECEINFOSECRET", "ORIGPIXELSECRET", "KEPTPIXELS",
+  # page 2: bars and zig-zag points inside boxes, the shape fully inside a box, the clipped shape's original rectangle
+  ${[5, 6, 7, 8, 9, 10, 11].map((k) => `"${(200 + 12 * k + 0.111 * ((k % 9) + 1)).toFixed(3)}"`).join(", ")},
+  ${[16, 17, 18, 19, 20, 21, 22, 23, 24].map((i) => `"${(80 + 11 * i + 0.137).toFixed(3)} ${(500 + 18 * Math.sin(i * 0.9) + 0.219).toFixed(3)}"`).join(", ")},
+  "280.317", "420.613", "240.25 300.25 120 40 re",
+  # page 3: every number of the curve
+  "100.731", "200.419", "150.853", "260.947", "200.163", "140.271", "250.577", "200.389", "300.991", "260.507", "350.613", "140.829", "400.241", "200.653"]
+found = sorted({s for s in secrets for b in blobs if s.encode() in b})
+print(json.dumps({"found": found, "strip": any(strip[:2000] in b or strip[-2000:] in b for b in blobs), "ccitt": "/CCITTFaxDecode" in filters,
+  "thumb": "/Thumb" in keys, "pieceinfo": "/PieceInfo" in keys, "objects": len(blobs)}))`, lfile));
+  check("leaks: the fax-compressed scan is gone from the file (no CCITT stream, none of its bytes)", !scanAll.strip && !scanAll.ccitt, JSON.stringify(scanAll));
+  check("leaks: the drawing's words are gone from the file (both lines; that page is a picture)", !scanAll.found.some((s) => s.startsWith("FORM")), scanAll.found.join(" "));
+  check("leaks: no /Thumb or /PieceInfo anywhere, nor their data", !scanAll.thumb && !scanAll.pieceinfo && !scanAll.found.includes("THUMBSECRET") && !scanAll.found.includes("PIECEINFOSECRET"), JSON.stringify(scanAll));
+  check("leaks: no coordinates of shapes under the boxes anywhere in the file", !scanAll.found.some((s) => /^\d/.test(s)), scanAll.found.join(" | "));
+  check("leaks: the original of a picture listed in resources shared with another page is gone", !scanAll.found.includes("ORIGPIXELSECRET"), scanAll.found.join(" "));
+  check("leaks: ...but a picture another page still draws stays (only pictures nothing draws are dropped)", scanAll.found.includes("KEPTPIXELS"), scanAll.found.join(" "));
+  check("leaks: the file was scanned object by object", scanAll.objects > 10, String(scanAll.objects));
+
+  const lpages = JSON.parse(py(`
+out = []
+for p in r.pages:
+    xo = p["/Resources"].get("/XObject") or {}
+    out.append({"images": [list(i.image.size) for i in p.images], "xobjects": sorted(xo.keys()), "streams": len(p.get_contents().get_data())})
+print(json.dumps(out))`, lfile));
+  const lwords = words(lfile).map((ws) => ws.map((x) => x.text).join(" "));
+  check("leaks: page 1 is just a picture of the page (no words, no scan or drawing left in its resources)", lwords[0] === "" && lpages[0].images.length === 1 && lpages[0].xobjects.length === 1 && lpages[0].images[0][0] > 1000, JSON.stringify(lpages[0]));
+  check("leaks: page 3 is just a picture too", lwords[2] === "" && lpages[2].images.length === 1 && lpages[2].xobjects.length === 1, JSON.stringify(lpages[2]));
+  check("leaks: pages 2, 4 and 5 keep their words", lwords[1] === "Shapes page heading" && lwords[3] === "Shared resources page" && lwords[4] === "Page five keeps its words", JSON.stringify(lwords));
+
+  // Page 2: no drawn shape has any part inside a box (all of the page's drawing instructions, followed through q/Q/cm).
+  const shapes = JSON.parse(py(`
+from pypdf.generic import ContentStream
+boxes = ${JSON.stringify(BOXES[2].map(([x0, y0, x1, y1]) => [x0 + 2, y0 + 2, x1 - 2, y1 - 2]))}
+def mul(a, b):
+    return [a[0]*b[0]+a[1]*b[2], a[0]*b[1]+a[1]*b[3], a[2]*b[0]+a[3]*b[2], a[2]*b[1]+a[3]*b[3], a[4]*b[0]+a[5]*b[2]+b[4], a[4]*b[1]+a[5]*b[3]+b[5]]
+def ap(m, x, y): return (m[0]*x+m[2]*y+m[4], m[1]*x+m[3]*y+m[5])
+def line_in(p, q, b):
+    t0, t1 = 0.0, 1.0
+    dx, dy = q[0]-p[0], q[1]-p[1]
+    for pp, qq in ((-dx, p[0]-b[0]), (dx, b[2]-p[0]), (-dy, p[1]-b[1]), (dy, b[3]-p[1])):
+        if pp == 0:
+            if qq < 0: return False
+        else:
+            t = qq / pp
+            if pp < 0: t0 = max(t0, t)
+            else: t1 = min(t1, t)
+    return t1 > t0
+page = r.pages[1]
+ops = ContentStream(page.get_contents(), r).operations
+ctm, stack, segs, cur, start, bad, dashes = [1,0,0,1,0,0], [], [], None, None, [], []
+for args, op in ops:
+    op = op.decode()
+    a = [float(x) for x in args] if op in ("cm","m","l","c","v","y","re") else args
+    if op == "q": stack.append(ctm)
+    elif op == "Q": ctm = stack.pop()
+    elif op == "cm": ctm = mul(a, ctm)
+    elif op == "d": dashes.append(float(args[1]))
+    elif op == "m": cur = start = ap(ctm, a[0], a[1])
+    elif op == "l":
+        q = ap(ctm, a[0], a[1]); segs.append(("l", cur, q)); cur = q
+    elif op in ("c", "v", "y"):
+        pts = [ap(ctm, a[i], a[i+1]) for i in range(0, len(a), 2)]
+        segs.append(("c", cur, *pts)); cur = pts[-1]
+    elif op == "h":
+        if cur and start: segs.append(("l", cur, start)); cur = start
+    elif op == "re":
+        x, y, w, h = a
+        c = [ap(ctm, x, y), ap(ctm, x+w, y), ap(ctm, x+w, y+h), ap(ctm, x, y+h)]
+        for i in range(4): segs.append(("l", c[i], c[(i+1) % 4]))
+        cur = start = c[0]
+    elif op in ("S","s","f","F","f*","B","B*","b","b*","n"):
+        for s in segs:
+            for b in boxes:
+                if s[0] == "l" and line_in(s[1], s[2], b): bad.append([op, s])
+                if s[0] == "c":
+                    xs = [p[0] for p in s[1:]]; ys = [p[1] for p in s[1:]]
+                    if max(xs) > b[0] and min(xs) < b[2] and max(ys) > b[1] and min(ys) < b[3]: bad.append([op, s])
+        segs, cur, start = [], None, None
+text = page.get_contents().get_data().decode("latin1")
+print(json.dumps({"bad": bad[:5], "nbad": len(bad), "dashes": dashes, "text": text}))`, lfile));
+  check("leaks: no shape on page 2 has any part inside a box", shapes.nbad === 0, JSON.stringify(shapes.bad));
+  const has = (s) => shapes.text.includes(s);
+  check("leaks: the page-sized background stays whole", has("0 0 612 792 re"));
+  check("leaks: rules crossing a box keep both outer ends", has("72 430.25 m") && has("540 430.25 l") && has("72 415.5 m") && has("540 415.5 l"));
+  check("leaks: the zig-zag line and bars outside the boxes are kept", has("80.137 500.219 m") && has("520.137") && has("200.111 620.5") && has("392.888 620.5"));
+  check("leaks: the curve away from the boxes is kept as it was", has("72 300 m 100 350 150 350 180 300 c S"));
+  check("leaks: the dashed rule continues its dashes after the box", shapes.dashes.some((d) => d > 270 && d < 290), JSON.stringify(shapes.dashes));
+  // Rendered, page 2 looks the same as the original everywhere outside the boxes.
+  execFileSync("pdftoppm", ["-r", "72", "-png", "-f", "2", "-l", "2", "-singlefile", pdf("redact-leaks.pdf"), join(SHOTS, "leaks-p2-before")]);
+  execFileSync("pdftoppm", ["-r", "72", "-png", "-f", "2", "-l", "2", "-singlefile", lfile, join(SHOTS, "leaks-p2-after")]);
+  const diff = JSON.parse(execFileSync("python3", ["-I", "-c", `
+import sys, json
+from PIL import Image
+a = Image.open(sys.argv[1]).convert("RGB"); b = Image.open(sys.argv[2]).convert("RGB")
+boxes = ${JSON.stringify(BOXES[2])}
+n = 0
+for y in range(a.height):
+    for x in range(a.width):
+        if any(b0 - 4 <= x <= b2 + 4 and 792 - b3 - 4 <= y <= 792 - b1 + 4 for b0, b1, b2, b3 in boxes): continue
+        if max(abs(p - q) for p, q in zip(a.getpixel((x, y)), b.getpixel((x, y)))) > 64: n += 1
+print(json.dumps({"n": n, "size": a.size}))`, join(SHOTS, "leaks-p2-before.png"), join(SHOTS, "leaks-p2-after.png")]).toString());
+  check("leaks: page 2 looks unchanged outside the boxes", diff.n <= 10, JSON.stringify(diff));
+  // Page 4: the picture is painted under the box, the rest unchanged.
+  // Page 4's own resources now list just its two painted copies; page 5 still gets the original from the shared list.
+  const p4 = JSON.parse(py(`
+four = [i.image.convert("L") for i in r.pages[3].images]
+big = [i for i in four if i.size == (64, 16)][0]
+small = [i for i in four if i.size == (40, 10)][0]
+print(json.dumps({"n": len(four), "box": big.getpixel((30, 8)), "rest": big.getpixel((2, 2)), "right": big.getpixel((60, 8)), "small": max(small.getdata()),
+  "five": [i.image.convert("L").tobytes()[:10].decode("latin1") for i in r.pages[4].images]}))`, lfile));
+  check("leaks: page 4's pictures are painted under the box, the rest unchanged", p4.n === 2 && p4.box < 40 && p4.rest === 200 && p4.right === 200 && p4.small < 40, JSON.stringify(p4));
+  check("leaks: page 5 still draws the original shared picture", JSON.stringify(p4.five) === '["KEPTPIXELS"]', JSON.stringify(p4.five));
+  check("leaks: no errors or warnings", lp.length === 0, lp.join(" | "));
+  await lctx.close();
 
   // ----- Phone -----
   const mctx = await browser.newContext({ ...devices["Pixel 7"] });

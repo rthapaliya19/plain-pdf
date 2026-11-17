@@ -173,3 +173,16 @@ Built in this order, each tried by the owner in the web preview, then one 1.3.0 
 - [x] 1.3.1: owner asked to release (2026-11-13)
 - [x] 1.3.1: 1.3.1 apps released for Windows, Mac and Android (2026-11-13)
 
+## Redaction fixes from an audit (2026-11-17)
+
+An audit of 1.3.1 found saved copies that still held what was meant to be removed. Fixed in src/save/redact.ts:
+
+- Pages saved as a picture kept their original pictures, drawings and fonts listed in the page's resources, so they stayed in the file (for example a fax-compressed scan, and a drawing's words). The page now gets new resources holding only its picture.
+- Shapes only partly under a box were kept whole. Now outlines inside a box are dropped; straight lines and filled rectangles crossing a box are cut where they meet it (dashed lines keep their dashes in step, and the rest of the page looks the same); curves, and filled shapes other than rectangles, crossing a box make that page a picture. Page backgrounds and rules don't.
+- Page thumbnails (/Thumb) and apps' private data (/PieceInfo, e.g. Illustrator's copy of the artwork) are dropped from redacted pages.
+- After removing, each page is read back and checked on its own (letters, pictures, shapes, hidden words, links under a box); if anything is left, the page is saved as a picture instead.
+- Pictures and drawings a redacted page stopped using, but still listed in resources shared with other pages (or inherited from the page tree), are dropped when no page draws them.
+- Tests: tests/fixtures/redact-leaks.pdf (made by make-redact-test.cjs) and 22 new checks in redact.test.cjs that search every object of the saved file, streams decoded.
+
+- [x] Fixes built and tested (86 redaction checks; 543 in all)
+- [ ] Owner to review, then decide on a release
