@@ -162,6 +162,73 @@ const hexToRgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
   const paper = hexToRgb(scanEdit);
   check("the patch matches the scan's cream paper", Math.abs(paper[0] - 247) < 6 && Math.abs(paper[1] - 245) < 6 && Math.abs(paper[2] - 239) < 6, scanEdit);
   await page.screenshot({ path: `${SHOTS}/e-d5-scan.png`, clip: { x: sp.x, y: sp.y + 130 * ss, width: 700, height: 100 } });
+
+  // ----- Lines set solid in a font with tall metrics: editing one leaves its neighbours alone -----
+  // tests/fixtures/tall-font-lines.pdf (make-tall-font-test.cjs): 20 pt lines 20 pt apart, baselines 92, 112 and 132 pt
+  // from the top, in a font whose ascent and descent reach into the next line; a link covers line three.
+  await page.setInputFiles("input[type=file]", pdf("tall-font-lines.pdf"));
+  await page.click("dialog[open] >> text=Discard and open"); // the scan's edit isn't saved
+  await page.waitForFunction(() => document.querySelector(".file-name")?.textContent === "tall-font-lines.pdf");
+  await page.waitForSelector('.page[data-page="1"] .page-canvas');
+  await page.waitForTimeout(500);
+  // The page as drawn on screen (an edit's patch and new words go over this drawing, not into it).
+  await page.evaluate(() => {
+    window.__pagePixels = () => {
+      const c = document.querySelector('.page[data-page="1"] .page-canvas');
+      return { w: c.width, h: c.height, data: c.getContext("2d").getImageData(0, 0, c.width, c.height).data };
+    };
+    window.__tallScreen = window.__pagePixels();
+  });
+  const tp = await box(page, '.page[data-page="1"]');
+  const ts = tp.w / 612;
+  await page.click('button[aria-label="Text"]');
+  await page.waitForTimeout(400);
+  await page.mouse.click(tp.x + 120 * ts, tp.y + 106 * ts);
+  await page.waitForSelector(".edit-editor");
+  check("tall font: tapping line two opens just that line", (await page.inputValue(".edit-editor")) === "Heading line two here", await page.inputValue(".edit-editor"));
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("Heading line TWO here");
+  await page.keyboard.press("Escape");
+  const tallPatch = await page.$eval('g[data-kind="edit"] rect', (r) => ({ y: Number(r.getAttribute("y")), h: Number(r.getAttribute("height")) }));
+  await page.click(".text-options .done-button");
+  await page.screenshot({ path: `${SHOTS}/e-d6-tall-font.png`, clip: { x: tp.x, y: tp.y + 60 * ts, width: 420 * ts, height: 100 * ts } });
+  await page.click("button.save-button");
+  await page.waitForFunction(() => window.__saves.length === 2 && window.__saves[1].bytes);
+  const tallFile = join(SHOTS, "saved-tall-font.pdf");
+  writeFileSync(tallFile, Buffer.from(await page.evaluate(() => window.__saves[1].bytes)));
+  const tallLines = execFileSync("pdftotext", ["-layout", tallFile, "-"]).toString().split("\n").map((l) => l.trim()).filter(Boolean);
+  check("tall font: lines one and three survive unchanged in the saved copy", tallLines.length === 3 && tallLines[0] === "Heading line one here" && tallLines[2] === "Heading line three here", JSON.stringify(tallLines));
+  check("tall font: line two reads only the new words", tallLines[1] === "Heading line TWO here", tallLines[1]);
+  const tallLinks = pypdf("print(' '.join(a.get_object()['/A']['/URI'] for a in r.pages[0].get('/Annots', [])))", tallFile);
+  check("tall font: the link on line three is kept", tallLinks === "https://example.com/line-three", tallLinks);
+  // Reopened, the saved copy shows exactly what the screen showed: outside the patch, no pixel has changed.
+  await page.setInputFiles("input[type=file]", tallFile);
+  await page.waitForFunction(() => document.querySelector(".file-name")?.textContent === "saved-tall-font.pdf");
+  await page.waitForSelector('.page[data-page="1"] .page-canvas');
+  await page.waitForTimeout(500);
+  // Rows of the page outside the patch (with 1 pt to spare for smoothing at its edges), before and after.
+  const tallDiff = await page.evaluate(([top, bottom]) => {
+    const before = window.__tallScreen;
+    const after = window.__pagePixels();
+    if (after.w !== before.w || after.h !== before.h) return { size: `${after.w}x${after.h} vs ${before.w}x${before.h}` };
+    const perPt = after.h / 792;
+    const y0 = Math.floor(top * perPt), y1 = Math.ceil(bottom * perPt);
+    let ink = 0, changed = 0;
+    for (let y = 0; y < after.h; y++) {
+      if (y >= y0 && y < y1) continue;
+      for (let x = 0; x < after.w; x++) {
+        const k = (y * after.w + x) * 4;
+        if (before.data[k] < 128) ink++;
+        const d = Math.max(Math.abs(before.data[k] - after.data[k]), Math.abs(before.data[k + 1] - after.data[k + 1]), Math.abs(before.data[k + 2] - after.data[k + 2]));
+        if (d > 24) changed++;
+      }
+    }
+    return { ink, changed };
+  }, [tallPatch.y - 1, tallPatch.y + tallPatch.h + 1]);
+  // (ink: lines one and three are mostly outside the patch, so the comparison covers their letters.)
+  check("tall font: saved copy matches the screen outside the patch", !tallDiff.size && tallDiff.ink > 1000 && tallDiff.changed === 0, JSON.stringify(tallDiff));
+  await page.screenshot({ path: `${SHOTS}/e-d7-tall-font-saved.png`, clip: { x: tp.x, y: tp.y + 60 * ts, width: 420 * ts, height: 100 * ts } });
+
   check("desktop: no privacy-lock violations", (await page.evaluate(() => window.__csp)).length === 0);
   check("desktop: no errors or warnings", problems.length === 0, problems.join(" | "));
   await ctx.close();

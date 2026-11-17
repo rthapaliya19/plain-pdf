@@ -38,9 +38,13 @@ export interface Rect {
   h: number;
 }
 
-/** Fraction of the font size above and below the baseline that letters use. */
-const ASCENT = 0.82;
-const DESCENT = 0.24;
+/**
+ * Fraction of the font size above and below the baseline that letters use.
+ * Edit patches are built from these line boxes, and saving uses them to tell
+ * the edited lines' letters from their neighbours' (see save/redact.ts).
+ */
+export const ASCENT = 0.82;
+export const DESCENT = 0.24;
 
 let measureContext: CanvasRenderingContext2D | null = null;
 

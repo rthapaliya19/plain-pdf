@@ -66,6 +66,8 @@ export interface PaintedRect {
   w: number;
   h: number;
   color: string;
+  /** The patch over edited words, rather than a redaction box (see Area in redact.ts). */
+  patch?: boolean;
 }
 
 export interface RedactionOptions {
@@ -180,7 +182,7 @@ function clearedRects(items: Addition[]): PaintedRect[] {
   const rects: PaintedRect[] = [];
   for (const a of items) {
     if (a.kind === "redact") rects.push({ x: a.x, y: a.y, w: a.width, h: a.height, color: "#000000" });
-    else if (a.kind === "edit") rects.push({ ...a.cover, color: a.coverColor });
+    else if (a.kind === "edit") rects.push({ ...a.cover, color: a.coverColor, patch: true });
   }
   return rects;
 }
@@ -195,7 +197,7 @@ function toArea(r: PaintedRect, toPdf: Matrix): Area {
   ].map(([x, y]) => [a * x + c * y + e, b * x + d * y + f]);
   const xs = corners.map((p) => p[0]);
   const ys = corners.map((p) => p[1]);
-  return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys), color: rgb(r.color) };
+  return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys), color: rgb(r.color), patch: r.patch };
 }
 
 /**

@@ -8,6 +8,11 @@
  * - drawn shapes lying inside a box are taken out;
  * - links, notes and form fields over a box are removed;
  * - hidden "ActualText" copies of words on the page are dropped.
+ * A redaction box takes anything it touches (removing too much is the safe
+ * direction there). An edit's patch only takes what clearly belongs under it:
+ * the letters of the edited lines, and shapes and pixels hidden under it. Its
+ * padding can reach into the lines above and below, which are still shown on
+ * screen, so they must stay in the saved copy too (see Area.patch).
  * Pictures and drawings that other pages also use are copied first, so the
  * other pages aren't affected. When something can't be handled safely (an
  * unusual font or picture format), the page is reported as needing to be
@@ -29,6 +34,7 @@ import {
   type PDFPage,
 } from "pdf-lib";
 import { Encodings, Font as StandardFont, type IFontNames } from "@pdf-lib/standard-fonts";
+import { ASCENT, DESCENT } from "../core/text-layout";
 
 /** An area to clear, in the page's own PDF coordinates, with the colour pictures are painted (0..1 RGB). */
 export interface Area {
@@ -37,7 +43,24 @@ export interface Area {
   x1: number;
   y1: number;
   color: [number, number, number];
+  /**
+   * The patch over edited words, rather than a redaction box. Only what
+   * clearly belongs under it is removed:
+   * - a letter, when its middle (see LINE_MIDDLE) is inside;
+   * - a shape or a picture's pixel, when it's wholly inside (hidden by the patch);
+   * - a link, note or form field, when its centre is inside.
+   */
+  patch?: boolean;
 }
+
+/**
+ * How far above its baseline the middle of a line of text is, in font sizes:
+ * the middle of the line box the app measures on screen, which edit patches
+ * are built from (padded above and below). A letter's own box isn't used for
+ * patches: fonts with tall ascent and descent (common in web pages printed to
+ * PDF) make it reach well into the next line.
+ */
+const LINE_MIDDLE = (ASCENT - DESCENT) / 2;
 
 export type RedactResult = { ok: true } | { ok: false; reason: string };
 
@@ -85,6 +108,11 @@ function touches(a: Box, b: Box, margin = 0.25): boolean {
 function inside(inner: Box, outer: Box, slack = 1): boolean {
   return inner.x0 >= outer.x0 - slack && inner.y0 >= outer.y0 - slack && inner.x1 <= outer.x1 + slack && inner.y1 <= outer.y1 + slack;
 }
+function containsPoint(box: Box, [x, y]: [number, number]): boolean {
+  return x >= box.x0 && x <= box.x1 && y >= box.y0 && y <= box.y1;
+}
+/** Allowance for rounding when deciding whether something lies within an edit's patch, in points. */
+const PATCH_SLACK = 0.01;
 
 // ---------------------------------------------------------------------------
 // Reading drawing instructions ("content streams")
@@ -496,18 +524,26 @@ interface PixelBox {
   r1: number;
 }
 
-/** The pixel rectangles of an image (width × height, drawn with `ctm`) that lie under the areas. */
+/**
+ * The pixel rectangles of an image (width × height, drawn with `ctm`) that lie
+ * under the areas: every pixel a redaction box touches, but only the pixels
+ * wholly hidden under an edit's patch (so a low-resolution picture, such as a
+ * stretched background, isn't repainted beyond the patch).
+ */
 function pixelBoxes(ctm: M, width: number, height: number, areas: Area[]): { box: PixelBox; color: Area["color"] }[] {
   const inv = invert(ctm);
   if (!inv) return [];
   const out: { box: PixelBox; color: Area["color"] }[] = [];
   for (const a of areas) {
     const b = bounds([apply(inv, a.x0, a.y0), apply(inv, a.x1, a.y0), apply(inv, a.x0, a.y1), apply(inv, a.x1, a.y1)]);
+    // Rounding outwards (redaction) or inwards (patch), allowing for tiny errors in the arithmetic.
+    const lo = (v: number) => (a.patch ? Math.ceil(v - 1e-6) : Math.floor(v));
+    const hi = (v: number) => (a.patch ? Math.floor(v + 1e-6) : Math.ceil(v));
     // Image space: (0,0) is the bottom-left; the first row of pixels is the top.
-    const c0 = Math.max(0, Math.floor(b.x0 * width));
-    const c1 = Math.min(width, Math.ceil(b.x1 * width));
-    const r0 = Math.max(0, Math.floor((1 - b.y1) * height));
-    const r1 = Math.min(height, Math.ceil((1 - b.y0) * height));
+    const c0 = Math.max(0, lo(b.x0 * width));
+    const c1 = Math.min(width, hi(b.x1 * width));
+    const r0 = Math.max(0, lo((1 - b.y1) * height));
+    const r1 = Math.min(height, hi((1 - b.y0) * height));
     if (c1 > c0 && r1 > r0) out.push({ box: { c0, r0, c1, r1 }, color: a.color });
   }
   return out;
@@ -800,7 +836,6 @@ async function redactContent(
   let tm: M = IDENTITY;
   let tlm: M = IDENTITY;
   let path: { start: number; points: [number, number][]; clip: boolean } | null = null;
-  const areaBoxes: Box[] = areas;
 
   /** Shows text; returns the replacement TJ text if any letter was under a box. */
   const show = (items: Value[]): string | null => {
@@ -831,8 +866,11 @@ async function redactContent(
         const trm = mul([fs * th, 0, 0, fs, 0, gs.rise], mul(tm, gs.ctm));
         const gw = Math.max(w0, 0.1);
         const glyph = bounds([apply(trm, 0, font.descent), apply(trm, gw, font.descent), apply(trm, 0, font.ascent), apply(trm, gw, font.ascent)]);
+        const middle = apply(trm, gw / 2, LINE_MIDDLE);
         const invisible = gs.render === 3 || gs.render === 7;
-        const hit = areaBoxes.some((a) => {
+        const hit = areas.some((a) => {
+          // An edit's patch: only the letters of the lines it was made for.
+          if (a.patch) return containsPoint(a, middle);
           const o = overlap(glyph, a);
           if (invisible) return o.w > 0.2 && o.h > 0.2;
           return o.w >= 0.25 * (glyph.x1 - glyph.x0) && o.h >= 0.25 * (glyph.y1 - glyph.y0) && o.w > 0.1 && o.h > 0.1;
@@ -977,7 +1015,7 @@ async function redactContent(
       case "n": {
         if (path && o.op !== "n" && !path.clip && path.points.length > 0) {
           const box = bounds(path.points);
-          if (areaBoxes.some((area) => inside(box, area))) replacements.push({ start: path.start, end: o.end, text: " " });
+          if (areas.some((area) => inside(box, area, area.patch ? PATCH_SLACK : undefined))) replacements.push({ start: path.start, end: o.end, text: " " });
         }
         path = null;
         break;
@@ -1075,7 +1113,7 @@ function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
   return true;
 }
 
-/** Removes links, notes and form fields that overlap the areas. */
+/** Removes links, notes and form fields that overlap redaction boxes, or whose centre is under an edit's patch. */
 function removeAnnotations(doc: PDFDocument, page: PDFPage, areas: Area[]): void {
   const ctx = doc.context;
   const annots = page.node.Annots();
@@ -1091,7 +1129,8 @@ function removeAnnotations(doc: PDFDocument, page: PDFPage, areas: Area[]): void
     const rect = annot.lookup(PDFName.of("Rect"));
     const r = rect instanceof PDFArray ? rect.asArray().map((v) => (ctx.lookup(v) as PDFNumber)?.asNumber?.() ?? 0) : null;
     const box = r ? { x0: Math.min(r[0], r[2]), y0: Math.min(r[1], r[3]), x1: Math.max(r[0], r[2]), y1: Math.max(r[1], r[3]) } : null;
-    if (box && areas.some((a) => touches(box, a))) removed.add(annot);
+    const centre: [number, number] = box ? [(box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2] : [0, 0];
+    if (box && areas.some((a) => (a.patch ? containsPoint(a, centre) : touches(box, a)))) removed.add(annot);
     else keep.push(item);
   }
   // Pop-up notes of removed annotations go too.

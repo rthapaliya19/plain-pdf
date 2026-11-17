@@ -157,6 +157,11 @@ Built in this order, each tried by the owner in the web preview, then one 1.3.0 
     text glyphs touching the box are removed from the page's content (the rest of the line keeps its place); pictures under it get those pixels
     painted over (black, or the patch's paper colour); vector shapes lying inside it are removed; links, notes and form fields over it are removed;
     "ActualText" hidden copies of text on that page are dropped. Shared pictures and drawings are copied first so other pages aren't affected.
+  - Text-edit patches take only what clearly belongs under them (fixed 2026-11-17, after an audit): letters whose middle (0.29 of the size
+    above the baseline: the middle of the line box the app measures, which patches are built from) is inside the patch; shapes and picture
+    pixels wholly hidden by it; links, notes and form fields whose centre is inside it. Redaction boxes keep the generous rule. Before, a
+    patch's padding could reach the next line's letter boxes in fonts with tall metrics (web pages printed to PDF), and that line was silently
+    deleted from the saved copy while still shown on screen (tests/fixtures/tall-font-lines.pdf).
   - Where that can't be done safely (unusual font encodings, unusual picture formats, pictures drawn inline), that page is saved as a 300 dpi
     picture with the boxes painted in, and the app says so.
 - [x] 1.3: owner approved the preview and asked to publish (2026-11-06)
