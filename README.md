@@ -69,7 +69,7 @@ When there's a new version, download and install it the same way, over the old o
 - **Search:** click the magnifying glass (or Ctrl+F, Cmd+F on Mac). Matches are highlighted; Enter and Shift+Enter go to the next and previous match; Esc closes.
 - **Print:** in the **⋯ More** menu (or Ctrl+P, Cmd+P). Prints what a saved copy would contain, including your drawings, text, signatures and form answers. On computers, pages print at 300 dots per inch. On Android, it opens Android's own print screen: choose your printer (or **Save as PDF**), copies and pages there.
 - **Organize pages:** in the **⋯ More** menu. A grid of page previews: tap pages to select them (Shift-click for a range), then **Rotate left/right**, **Delete**, or **Save as new PDF** (just the selected pages). Drag pages to reorder them; on a phone, press and hold a page, then drag. Drawings, text and signatures stay with their page and turn with it. Everything can be undone.
-- **Redact (remove for good):** in the **⋯ More** menu. Drag a box over anything you want removed: words, pictures, part of a scan. It shows as a black box; tap it to move it, drag the round corner to resize it, or tap × to remove it. When you save a copy, everything under the black boxes is removed from the file for good (including hidden copies of the words), and the rest of the page stays as it was. Rarely, a page has something that can't be removed piece by piece (an unusual font or picture format); that page is then saved as a picture, and the app says so. The original file isn't changed.
+- **Redact (remove for good):** in the **⋯ More** menu. Drag a box over anything you want removed: words, pictures, part of a scan. It shows as a black box; tap it to move it, drag the round corner to resize it, or tap × to remove it. When you save a copy, everything under the black boxes is removed from the file for good (including hidden copies of the words), and the rest of the page stays as it was. Sometimes a page has something that can't be removed piece by piece (an unusual font or picture format such as a fax-style scan, or a drawing or handwritten signature lying partly under a box); that page is then saved as a picture, and the app says so. The original file isn't changed.
 - **Add pages from another PDF:** in the **⋯ More** menu or the Organize screen. Adds all pages of one or more files to the end. Save then makes one combined file. (Fillable form fields are locked into the pages when pages are reorganized or combined.)
 - **Sign:** click **Sign** to open the Sign panel with your **signature** and **initials**. The first time, tap "+ Add signature" or "+ Add initials" and draw them (they're saved only on this device). After that, tap one to place it, or use **Draw new** or **Remove**. A placed signature appears in the middle of the page you're viewing: drag it to move, drag the round corner to resize, and tap × (or press Delete) to remove it.
 - **Save:** click **Save** (or Ctrl+S, Cmd+S on Mac) to save a copy named "name-edited.pdf" with everything you added locked into the pages. The original file is never changed. If you haven't changed anything, Save keeps an exact copy under the original name (handy for keeping a PDF from an email or Google Drive). In Chrome on a computer you choose where to save it; on phones it goes to Downloads.
@@ -148,7 +148,8 @@ tests/
   e2e/redact.test.cjs    browser tests for redaction (also checks saved files with pypdf, pdftotext and Pillow)
   e2e/protected.test.cjs browser tests for saving and printing password-protected PDFs
   e2e/android-print.test.cjs  browser tests for printing in the Android app (with a stand-in for Android's print screen)
-  fixtures/              sample PDFs used by the tests (make-redact-test.cjs makes redact-test.pdf)
+  e2e/audit.test.cjs     browser tests for the problems found by the November 2026 audit (leftovers in redacted copies, heavy drawing, previews, tightly set lines)
+  fixtures/              sample PDFs used by the tests (make-redact-test.cjs makes redact-test.pdf, make-audit-cases.cjs makes audit-cases.pdf)
 ```
 
 Each page in the viewer has an overlay layer on top of the PDF drawing. The pen, highlighter and (later) signature tools draw into that layer, so they never change the original file. Additions are only written into a new copy when saving.
@@ -183,6 +184,7 @@ node tests/e2e/contents.test.cjs
 node tests/e2e/redact.test.cjs           # needs pypdf, Pillow and poppler (pdftotext, pdftoppm)
 node tests/e2e/protected.test.cjs        # needs pypdf and pdftoppm (poppler)
 node tests/e2e/android-print.test.cjs   # needs pypdf and pdftoppm (poppler)
+node tests/e2e/audit.test.cjs           # needs pypdf, Pillow and poppler
 ```
 
 ## License

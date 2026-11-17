@@ -173,3 +173,28 @@ Built in this order, each tried by the owner in the web preview, then one 1.3.0 
 - [x] 1.3.1: owner asked to release (2026-11-13)
 - [x] 1.3.1: 1.3.1 apps released for Windows, Mac and Android (2026-11-13)
 
+## Audit and fixes (2026-11-17)
+
+An audit (reading all the code, the 521 checks, and new stress tests: a 3,000-page file, a 65 MB file of scans, heavy handwriting, damaged files) found five problems. All five are fixed and have their own checks (`tests/e2e/audit.test.cjs`, 35 checks; 556 in all). Not released yet: the owner decides when (it would be 1.3.2).
+
+| # | Problem | Fix |
+|---|---|---|
+| 1 | A page saved as a picture for redaction (for example a fax-style scan) still held the original scan, drawings and fonts inside the file, where they could be recovered. | The page now gets a fresh, empty list of what it uses, so the originals are cleared out of the file. |
+| 2 | Shapes only partly under a redaction box stayed whole (outlined words, a drawn signature), and a page's preview picture and app-private data were kept. | Pieces of a shape lying under a box are taken out. A detailed shape that crosses the edge of a box makes that page a picture (simple lines, underlines and backgrounds don't). Preview pictures and app-private data are dropped from redacted pages. |
+| 3 | Save (and Print) failed once one page held about 40,000 pen points. | Drawing instructions are handed over in pieces; 250,000 points on a page now save in under two seconds. |
+| 4 | Organize showed the page previews of a file opened earlier. | Previews are forgotten when another file is opened. |
+| 5 | Editing one line of tightly spaced text removed the line below from the saved copy (the screen looked right). | The patch over edited words only removes letters whose middle is under it; redaction boxes keep the wider rule. |
+
+- [x] Audit fixes built and tested (556 checks), on branch `claude/sharp-mendel-r4kgeo` (see `docs/HANDOFF.md` for the details and next steps)
+- [ ] Owner tries the preview
+- [ ] Release
+
+Found by the audit and still open (advice, not yet agreed):
+
+- Rotating, deleting or reordering pages drops the chapter list from the saved copy (the file is rebuilt).
+- Saved copies of filled forms contain a few invalid references (readers ignore them; strict checkers may not).
+- Typed characters outside Western European ones (for example ✓ or 山田) are saved as "?" without a warning.
+- Search on very long files is slow and marks every match at once; printing builds every page in memory first, with no cancel.
+- Hidden descriptions in a tagged PDF's structure ("Alt" and "ActualText" outside the page) aren't removed by redaction.
+- To check on the devices: closing the window with unsaved changes (Windows, Mac), web links in the installed apps, Android backup of the saved signature, large files from Drive on Android.
+- The checks aren't run automatically before a release.
